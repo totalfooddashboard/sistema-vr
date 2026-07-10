@@ -947,8 +947,11 @@ Regras: valores numéricos com ponto decimal; não invente itens; se não achar 
       headers:{"content-type":"application/json","x-api-key":CONFIG.apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
       body:JSON.stringify({model:CONFIG.modelo||"claude-sonnet-5",max_tokens:2000,messages:[{role:"user",content:[{type:"image",source:{type:"base64",media_type:media,data:b64}},{type:"text",text:prompt}]}]})});
     if(!res.ok){const er=await res.text();throw new Error("API "+res.status+": "+er.slice(0,180));}
-    const data=await res.json();let t=(data.content&&data.content[0]&&data.content[0].text||"").trim();
-    t=t.replace(/^```json/i,"").replace(/^```/,"").replace(/```$/,"").trim();
+    const data=await res.json();
+    // o modelo pode devolver bloco de "pensamento" + texto; pega só o(s) bloco(s) de texto
+    let t=((data.content||[]).filter(c=>c.type==="text").map(c=>c.text||"").join("")||"").trim();
+    t=t.replace(/```json/gi,"").replace(/```/g,"").trim();
+    const a=t.indexOf("{"),z=t.lastIndexOf("}");if(a>=0&&z>a)t=t.slice(a,z+1); // isola o JSON
     const obj=JSON.parse(t);
     if(obj.fornecedor&&!$("#cFornec").value)$("#cFornec").value=obj.fornecedor;
     if(obj.data&&/^\d{4}-\d{2}-\d{2}$/.test(obj.data))$("#cData").value=obj.data;
