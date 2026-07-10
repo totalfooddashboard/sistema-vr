@@ -346,7 +346,8 @@ async function cloudSet(col,obj){if(!FB_OK||!obj)return;try{await DB.collection(
 async function cloudDel(col,id){if(!FB_OK)return;try{await DB.collection(col).doc(String(id)).delete();}catch(e){avisoNuvem(e);}}
 function pararEscutas(){SUBS.forEach(u=>{try{u();}catch(e){}});SUBS=[];}
 function escutar(col,setArr){
-  const un=DB.collection(col).onSnapshot(snap=>{const a=[];snap.forEach(d=>a.push(d.data()));setArr(a);montarFiltroMes();refreshUI();},err=>avisoNuvem(err));
+  // erro de listener costuma ser transitório no momento do login — não alarma, só loga.
+  const un=DB.collection(col).onSnapshot(snap=>{const a=[];snap.forEach(d=>a.push(d.data()));setArr(a);montarFiltroMes();refreshUI();},err=>console.warn("escuta "+col+":",err&&err.code));
   SUBS.push(un);
 }
 function iniciarEscutas(){
