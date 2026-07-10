@@ -409,6 +409,7 @@ function iniciar(){
   $("#btnConfig").classList.toggle("hide",!isAdmin());
   montarNav();
   iniciarEscutas();
+  carregarConfigNuvem(); // puxa a chave da IA compartilhada pela nuvem
   montarFiltroMes();
   render();
   tab(isAdmin()?"painel":"eventos");
@@ -933,7 +934,8 @@ function excluirCompra(id){if(!confirm("Excluir esta compra?"))return;COMPRAS=CO
 /* ---- IA: ler comprovante ---- */
 async function lerComprovanteIA(){
   if(!EDITC.comprovanteFoto){alert("Bata a foto do comprovante primeiro.");return;}
-  if(!CONFIG.apiKey){alert("Pra usar a IA, o dono precisa colar a chave da Anthropic em ⚙️ Configurações (senha geral).");return;}
+  if(!CONFIG.apiKey){await carregarConfigNuvem();}
+  if(!CONFIG.apiKey){alert("A leitura por IA ainda não foi ativada.\n\nO dono precisa entrar uma vez em ⚙️ Configurações e colar a chave da Anthropic — depois funciona pra todo mundo.");return;}
   const btn=$("#btnIA");const txt=btn.innerHTML;btn.innerHTML=`<span class="spin"></span> Lendo comprovante...`;btn.disabled=true;
   try{
     const [meta,b64]=EDITC.comprovanteFoto.split(",");const media=(meta.match(/data:(.*?);/)||[])[1]||"image/jpeg";
@@ -1103,7 +1105,7 @@ function renderConfig(){if(!isAdmin())return;
   <div id="funcBox"></div>
   <button class="btn sec sm" style="width:100%;margin-top:6px" onclick="addFuncionario()">+ Cadastrar funcionário</button>
   <div class="sec-tit">🤖 Leitura de comprovante por IA</div>
-  <p class="hint" style="margin-top:-4px;margin-bottom:10px">Cole sua chave da Anthropic (começa com <code>sk-ant-</code>). Ela fica salva <b>só neste aparelho</b>, nunca sai daqui a não ser pra ler o cupom.</p>
+  <p class="hint" style="margin-top:-4px;margin-bottom:10px">Cole sua chave da Anthropic (começa com <code>sk-ant-</code>). Ao salvar, ela é <b>compartilhada com a equipe</b> pela nuvem, pra qualquer funcionário conseguir ler o comprovante — <b>sem precisar de conta própria</b>. Dica: coloque um limite de gasto na chave, lá na Anthropic.</p>
   <div class="field"><label>Chave da API (Anthropic)</label><input id="cfgKey" type="password" value="${esc(CONFIG.apiKey)}" placeholder="sk-ant-..."></div>
   <div class="field"><label>Modelo</label><input id="cfgModelo" value="${esc(CONFIG.modelo)}" placeholder="claude-sonnet-5"></div>
   <button class="btn gh" onclick="salvarConfig()">Salvar configurações</button>
@@ -1149,7 +1151,11 @@ function toggleFuncAtivo(id){const f=FUNCIONARIOS.find(x=>x.id===id);if(!f)retur
 function reenviarSenhaFunc(email){if(!email||!FB_OK)return;AUTH.sendPasswordResetEmail(email).then(()=>alert("📧 Enviei o email de nova senha pra "+email)).catch(e=>alert(erroAuth(e)));}
 async function salvarConfig(){
   CONFIG.apiKey=$("#cfgKey").value.trim();CONFIG.modelo=$("#cfgModelo").value.trim()||"claude-sonnet-5";
-  salvarConf();alert("Configurações salvas ✅");}
+  salvarConf();
+  // compartilha a chave na nuvem pra TODA a equipe poder usar a IA (só o dono grava)
+  if(FB_OK){try{await DB.collection(COL.user).doc("config_app").set({id:"config_app",apiKey:CONFIG.apiKey,modelo:CONFIG.modelo,atualizadoEm:Date.now()});}catch(e){avisoNuvem(e);}}
+  alert("Configurações salvas ✅\nA leitura por IA agora funciona pra toda a equipe.");}
+async function carregarConfigNuvem(){if(!FB_OK)return;try{const d=await DB.collection(COL.user).doc("config_app").get();if(d.exists){const x=d.data();if(x.apiKey)CONFIG.apiKey=x.apiKey;if(x.modelo)CONFIG.modelo=x.modelo;}}catch(e){}}
 function exportarBackup(){const blob=new Blob([JSON.stringify({SERVICOS,COMPRAS,ESTOQUE,CONFIG,FUNCIONARIOS,CONTAS},null,2)],{type:"application/json"});
   const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="backup-vr-"+hoje()+".json";a.click();}
 function importarBackup(input){const f=input.files&&input.files[0];if(!f)return;const r=new FileReader();
