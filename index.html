@@ -250,8 +250,8 @@ nav button.on{color:var(--lar);border-bottom-color:var(--lar)}
 
   <!-- ESTOQUE -->
   <div id="tab-estoque" class="wrap hide">
-    <div class="info">Estoque atual. As <b>sobras das compras</b> caem aqui automaticamente. Você também pode lançar o <b>estoque inicial</b> na mão.</div>
-    <button class="btn sm" style="margin-bottom:12px" onclick="addEstoqueItem()">+ Item no estoque</button>
+    <div class="info">Estoque atual. As <b>sobras das compras</b> caem aqui automaticamente.</div>
+    <button class="btn sm hide" id="btnAddEstoque" style="margin-bottom:12px" onclick="addEstoqueItem()">+ Item no estoque</button>
     <div id="listaEstoque"></div>
   </div>
 
@@ -461,14 +461,14 @@ function iniciar(){
 function montarNav(){
   const abas=isAdmin()
     ? [["painel","📊 Painel"],["eventos","📋 Eventos"],["compras","🛒 Compras"],["contas","💳 Contas"],["recibos","🧾 Recibos"],["estoque","📦 Estoque"],["precos","💲 Preços"]]
-    : [["painelf","🏠 Início"],["eventos","📋 Eventos"],["compras","🛒 Compras"]];
+    : [["painelf","🏠 Início"],["eventos","📋 Eventos"],["compras","🛒 Compras"],["estoque","📦 Estoque"]];
   $("#nav").innerHTML=abas.map(([k,l])=>`<button data-tab="${k}" onclick="tab('${k}')">${l}</button>`).join("");
 }
 
 /* ===================== NAV ===================== */
 const TABS=["painel","painelf","eventos","compras","contas","recibos","estoque","precos","novo","config"];
 function tab(t){
-  if((t==="estoque"||t==="precos"||t==="config"||t==="painel"||t==="contas"||t==="recibos")&&!isAdmin())t="eventos";
+  if((t==="precos"||t==="config"||t==="painel"||t==="contas"||t==="recibos")&&!isAdmin())t="eventos";
   CURRENT_TAB=t;
   document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("on",b.dataset.tab===t));
   TABS.forEach(x=>$("#tab-"+x).classList.toggle("hide",x!==t));
@@ -795,7 +795,9 @@ function salvarServico(){coletarForm();
 function cancelarForm(){EDIT=null;tab("eventos");}
 
 /* ---- fotos com carimbo ---- */
-function tirarFoto(tipo){FOTO_ALVO=tipo;$("#fotoInput").click();}
+function tirarFoto(tipo){
+  if(!isAdmin()&&EDIT&&EDIT.data&&EDIT.data>hoje()){alert("As fotos da entrega são registradas no dia. A entrega é dia "+EDIT.data+".");return;}
+  FOTO_ALVO=tipo;$("#fotoInput").click();}
 function receberFoto(input){const file=input.files&&input.files[0];if(!file)return;input.value="";
   const quando=new Date();let geo=null;
   const proc=()=>{const reader=new FileReader();reader.onload=e=>{const img=new Image();img.onload=()=>{
@@ -811,6 +813,37 @@ function receberFoto(input){const file=input.files&&input.files[0];if(!file)retu
 function renderFotos(){const g=$("#fotosGrid");if(!g)return;
   g.innerHTML=(EDIT.fotos||[]).map((f,i)=>`<div class="foto-item"><img src="${f.dataUrl}" onclick="verFoto('${f.dataUrl}')"><div class="del" onclick="EDIT.fotos.splice(${i},1);renderFotos()">✕</div><div class="lbl">${esc(f.tipo)}${f.geo?" 📍":""}</div></div>`).join("");}
 function verFoto(src){modal(`<img src="${src}" style="width:100%;border-radius:12px"><button class="btn sec" style="margin-top:10px" onclick="fecharModal()">Fechar</button>`);}
+
+/* ---- registrar entrega (fotos + chegada) — livre p/ funcionário, mesmo lançado ---- */
+function comprovarEntrega(id){const s=SERVICOS.find(x=>x.id===id);if(!s)return;EDIT=JSON.parse(JSON.stringify(s));fecharModal();formComprovacao();}
+function formComprovacao(){const s=EDIT;
+  const futuro = s.data && s.data>hoje();
+  const aviso = futuro?`<div class="warn">A entrega é dia <b>${esc(s.data)}</b>. Fotos e hora de chegada devem ser registradas <b>no dia</b>.</div>`:'';
+  modal(`<h2 style="margin-bottom:4px">📸 Registrar entrega</h2>
+    <p class="muted" style="margin-top:0">${esc(s.cliente||'')} · ${esc(s.data||'')} ${s.horaEvento?'· '+s.horaEvento:''}</p>
+    ${aviso}
+    <div class="field"><label>Hora que chegou no cliente</label>
+      <div style="display:flex;gap:6px"><input type="time" id="cChegada" value="${esc(s.comprovacao.horaChegada||'')}">
+      <button class="btn" style="flex:0 0 auto;white-space:nowrap;padding:11px 14px" onclick="$('#cChegada').value=agora()">🕐 Cheguei agora</button></div>
+      <p class="hint">O "cheguei agora" pega a hora do seu celular automaticamente.</p></div>
+    <label>Fotos da entrega (data, hora e local carimbados)</label>
+    <input type="file" accept="image/*" capture="environment" id="fotoInput" style="display:none" onchange="receberFoto(this)">
+    <div class="row" style="margin-bottom:8px">
+      <button class="btn sec sm" style="width:100%" onclick="tirarFoto('Chegada')">📷 Chegada</button>
+      <button class="btn sec sm" style="width:100%" onclick="tirarFoto('Montagem')">📷 Montagem</button>
+      <button class="btn sec sm" style="width:100%" onclick="tirarFoto('Entrega')">📷 Entrega</button></div>
+    <div class="fotos-grid" id="fotosGrid"></div>
+    <label style="margin-top:12px">Checklist de qualidade</label>
+    <div id="checkBox" style="margin-bottom:12px">${CHECKLIST.map((t,i)=>`<div class="check ${s.comprovacao.checklist['c'+i]?'done':''}" onclick="toggleCheck(${i})"><input type="checkbox" ${s.comprovacao.checklist['c'+i]?'checked':''} onclick="event.stopPropagation();toggleCheck(${i})"><span>${t}</span></div>`).join("")}</div>
+    <div class="field"><label>Observações</label><textarea id="cObs" rows="2" placeholder="Intercorrências, elogios...">${esc(s.comprovacao.obs||'')}</textarea></div>
+    <div class="field"><label>Status</label><div class="pill-select">
+      <button class="${s.status==='and'?'on':''}" onclick="setStatus(this,'and')">Em andamento</button>
+      <button class="${s.status==='entregue'?'on':''}" onclick="setStatus(this,'entregue')">✅ Entregue</button></div></div>
+    <button class="btn gh" onclick="salvarComprovacao()">✔️ Salvar entrega</button>
+    <button class="btn sec" style="margin-top:8px" onclick="EDIT=null;fecharModal()">Cancelar</button>`);
+  renderFotos();}
+function salvarComprovacao(){EDIT.comprovacao.horaChegada=$("#cChegada").value;EDIT.comprovacao.obs=$("#cObs").value;
+  cloudSet(COL.ev,EDIT);EDIT=null;fecharModal();render();setTimeout(()=>alert("Entrega registrada ✅"),100);}
 
 /* ---- detalhe evento ---- */
 function abrirDetalhe(id){const s=SERVICOS.find(x=>x.id===id);if(!s)return;const c=CONTRATOS[s.contrato]||{};const admin=isAdmin();
@@ -856,9 +889,10 @@ function abrirDetalhe(id){const s=SERVICOS.find(x=>x.id===id);if(!s)return;const
     <div class="timeline" style="margin-bottom:8px"><div class="t"><b>Previsto</b> chegada ${s.comprovacao.horaPrevista||"—"}</div><div class="t"><b>Real</b> chegada ${s.comprovacao.horaChegada||"—"} ${atrasoTxt(s)}</div></div>
     ${checks}${s.comprovacao.obs?`<p style="font-size:13.5px;margin-top:8px"><b>Obs:</b> ${esc(s.comprovacao.obs)}</p>`:""}
     <div class="fotos-grid" style="margin-top:10px">${(s.fotos||[]).map(f=>`<div class="foto-item"><img src="${f.dataUrl}" onclick="verFoto('${f.dataUrl}')"><div class="lbl">${esc(f.tipo)} ${new Date(f.ts).toLocaleTimeString("pt-BR").slice(0,5)}</div></div>`).join("")||'<p class="muted">Sem fotos</p>'}</div>
-    <div class="row" style="margin-top:18px">
-      ${podeEd?`<button class="btn sec" onclick="editarServico('${s.id}')">✏️ Editar</button>`
-             :`<button class="btn" style="background:var(--amarelo)" onclick="solicitarAlteracao('${s.id}')">🔓 Solicitar autorização pra alterar</button>`}
+    <button class="btn" style="margin-top:18px" onclick="comprovarEntrega('${s.id}')">📸 Registrar / editar entrega (fotos + chegada)</button>
+    <div class="row" style="margin-top:8px">
+      ${podeEd?`<button class="btn sec" onclick="editarServico('${s.id}')">✏️ Editar pedido</button>`
+             :`<button class="btn sec" style="background:var(--amar-claro);color:#92400e" onclick="solicitarAlteracao('${s.id}')">🔓 Autorização p/ alterar pedido</button>`}
       <button class="btn sec" onclick="duplicarClienteDia('${s.id}')">➕ Outro deste cliente</button>
     </div>
     ${admin?`<button class="btn" style="margin-top:8px;background:var(--azul)" onclick="gerarReciboDeEvento('${s.id}')">🧾 Gerar recibo deste pedido</button>`:''}
@@ -1014,16 +1048,17 @@ function estoqueEntrada(nome,un,qtd,custoUnit){
   else {e={id:uid(),nome:nome,unidade:un||"un",qtd:+qtd||0,custoUnit:+custoUnit||0,minimo:0,atualizadoEm:hoje()};ESTOQUE.push(e);}
   cloudSet(COL.est,e);
 }
-function renderEstoque(){const host=$("#listaEstoque");if(!host)return;
-  if(!ESTOQUE.length){host.innerHTML=`<div class="empty"><div class="ic">📦</div>Estoque vazio.<br>Lance o <b>estoque inicial</b> ou deixe as sobras das compras entrarem.</div>`;return;}
+function renderEstoque(){const host=$("#listaEstoque");if(!host)return;const admin=isAdmin();
+  const ab=$("#btnAddEstoque");if(ab)ab.classList.toggle("hide",!admin);
+  if(!ESTOQUE.length){host.innerHTML=`<div class="empty"><div class="ic">📦</div>Estoque vazio.<br>${admin?'Lance o <b>estoque inicial</b> ou deixe as sobras das compras entrarem.':'As sobras das compras entram aqui.'}</div>`;return;}
   const val=ESTOQUE.reduce((t,e)=>t+(+e.qtd||0)*(+e.custoUnit||0),0);
-  host.innerHTML=`<div class="card" style="padding:12px"><div style="display:flex;justify-content:space-between"><b>Valor total em estoque</b><b style="color:var(--lar)">${brl(val)}</b></div></div>
-    <table class="tabela"><tr><th>Item</th><th>Qtd</th><th>R$/un</th><th></th></tr>`+
+  host.innerHTML=(admin?`<div class="card" style="padding:12px"><div style="display:flex;justify-content:space-between"><b>Valor total em estoque</b><b style="color:var(--lar)">${brl(val)}</b></div></div>`:'')+
+    `<table class="tabela"><tr><th>Item</th><th>Qtd</th>${admin?'<th>R$/un</th><th></th>':''}</tr>`+
     [...ESTOQUE].sort((a,b)=>norm(a.nome).localeCompare(norm(b.nome))).map(e=>{
       const baixo=e.minimo&&(+e.qtd<=+e.minimo);
       return `<tr><td><b>${esc(e.nome)}</b>${baixo?' <span class="est-baixo">⚠ baixo</span>':''}<div class="muted" style="font-size:11px">atual. ${esc(e.atualizadoEm||'')}</div></td>
-        <td class="${baixo?'est-baixo':''}">${e.qtd} ${esc(e.unidade)}</td><td>${brl(e.custoUnit)}</td>
-        <td style="text-align:right"><button class="btn sm sec" onclick="editEstoque('${e.id}')">ajustar</button></td></tr>`;
+        <td class="${baixo?'est-baixo':''}">${e.qtd} ${esc(e.unidade)}</td>
+        ${admin?`<td>${brl(e.custoUnit)}</td><td style="text-align:right"><button class="btn sm sec" onclick="editEstoque('${e.id}')">ajustar</button></td>`:''}</tr>`;
     }).join("")+`</table>`;
 }
 function addEstoqueItem(){editEstoque(null);}
