@@ -943,12 +943,20 @@ function renderCompras(){const host=$("#listaCompras");if(!host)return;
       <div class="top"><div>
         <div class="nome">${esc(c.fornecedor||"Sem fornecedor")}</div>
         <div class="meta">${esc(c.data||"")} · ${nItens} itens ${!evP&&evs>1?`· ${evs} eventos`:""}</div>
-        ${evP?`<div class="meta" style="color:var(--lar);font-weight:700">🎯 ${esc(evP.cliente||'evento')}${evP.evento?' · '+esc(evP.evento):''}</div>`:(c.aloc&&c.aloc.length?'':'<div class="meta" style="color:var(--amarelo);font-weight:700">⚠ sem evento — não entra no custo</div>')}
+        ${evP?`<div class="meta" style="color:var(--lar);font-weight:700">🎯 ${esc(evP.cliente||'evento')}${evP.evento?' · '+esc(evP.evento):''}</div>`:(c.empresaGeral?`<div class="meta" style="color:var(--verde);font-weight:700">🏢 ${esc(CONTRATOS[c.empresaGeral]?CONTRATOS[c.empresaGeral].nome:c.empresaGeral)} (geral)</div>`:(c.aloc&&c.aloc.length?'':'<div class="meta" style="color:var(--amarelo);font-weight:700">⚠ sem evento — não entra no custo</div>'))}
       </div><div style="text-align:right"><b>${brl(compraTotal(c))}</b>${c.comprovanteFoto?'<div style="font-size:11px;color:var(--verde);font-weight:700">✅ comprovante</div>':'<div style="font-size:11px;color:var(--vermelho);font-weight:700">⚠ sem comprovante</div>'}</div></div>
       ${isAdmin()&&sobra?`<div class="meta" style="color:var(--amarelo);font-weight:700">📦 tem sobra pra desmembrar/estoque</div>`:""}</div>`;
   }).join("");
 }
-function novaCompra(){EDITC={id:uid(),criadoEm:Date.now(),criadoPor:USER.nome,data:hoje(),fornecedor:"",eventoId:"",comprovanteFoto:null,itens:[],aloc:[],sobrasEnviadas:false};formCompra();}
+function optgroupsEventosCompra(){
+  const grupos=[['evento','📅 VR · Eventos avulsos'],['arcelormittal','📅 Arcelormittal'],['arco','📅 ARCO Educação']];
+  return grupos.map(([k,lbl])=>{
+    const evs=[...SERVICOS].filter(s=>(s.contrato||'evento')===k).sort((a,b)=>(b.data||'').localeCompare(a.data||'')).slice(0,60);
+    if(!evs.length)return '';
+    return `<optgroup label="${lbl}">`+evs.map(s=>`<option value="ev:${s.id}" ${EDITC.eventoId===s.id?'selected':''}>${esc(s.cliente||'evento')}${s.evento?' · '+esc(s.evento):''} · ${esc(s.data||'')}</option>`).join('')+`</optgroup>`;
+  }).join('');
+}
+function novaCompra(){EDITC={id:uid(),criadoEm:Date.now(),criadoPor:USER.nome,data:hoje(),fornecedor:"",eventoId:"",empresaGeral:"",comprovanteFoto:null,itens:[],aloc:[],sobrasEnviadas:false};formCompra();}
 function editarCompra(id){EDITC=JSON.parse(JSON.stringify(COMPRAS.find(c=>c.id===id)));fecharModal();formCompra();}
 function formCompra(){
   modal(`<h2 style="margin-bottom:12px">${COMPRAS.find(c=>c.id===EDITC.id)?"✏️ Editar compra":"🛒 Nova compra"}</h2>
@@ -956,12 +964,22 @@ function formCompra(){
     <div class="field"><label>Fornecedor</label><input id="cFornec" value="${esc(EDITC.fornecedor)}" placeholder="Ex: Atacadão, Chiquim..."></div>
     <div class="field" style="flex:0 0 140px"><label>Data</label><input type="date" id="cData" value="${esc(EDITC.data)}"></div>
   </div>
-  <div class="field"><label>🎯 Para qual evento? <span class="muted" style="text-transform:none">(a compra inteira entra no custo desse evento)</span></label>
-    <select id="cEvento"><option value="">— não vinculado / vários eventos —</option>${[...SERVICOS].sort((a,b)=>(b.data||'').localeCompare(a.data||'')).slice(0,60).map(s=>`<option value="${s.id}" ${EDITC.eventoId===s.id?'selected':''}>${esc(s.cliente||'evento')}${s.evento?' · '+esc(s.evento):''} · ${esc(s.data||'')}</option>`).join('')}</select></div>
+  <div class="field"><label>🎯 Para qual empresa / evento? <span class="muted" style="text-transform:none">(a compra inteira entra no custo do evento escolhido; ou marque a empresa no "geral")</span></label>
+    <select id="cEvento"><option value="">— não vinculado / vários eventos —</option>
+      <optgroup label="🏢 Empresa (geral — sem evento específico)">
+        <option value="emp:evento" ${EDITC.empresaGeral==='evento'?'selected':''}>VR · Eventos avulsos (geral)</option>
+        <option value="emp:arcelormittal" ${EDITC.empresaGeral==='arcelormittal'?'selected':''}>Arcelormittal (geral)</option>
+        <option value="emp:arco" ${EDITC.empresaGeral==='arco'?'selected':''}>ARCO Educação (geral)</option>
+      </optgroup>${optgroupsEventosCompra()}</select>
+    <p class="hint" style="margin-top:6px">Pra dividir a mesma compra entre <b>vários eventos/empresas</b>, salve e use <b>"🔀 Desmembrar entre eventos"</b> dentro da compra.</p></div>
   <div class="warn">📸 Foto do <b>comprovante (cupom/nota) é obrigatória</b> pra salvar.</div>
   <input type="file" accept="image/*" capture="environment" id="compInput" style="display:none" onchange="receberComprovante(this)">
+  <input type="file" accept="image/*" id="compInputLib" style="display:none" onchange="receberComprovante(this)">
   <div id="compFotoBox"></div>
-  <button class="btn sec sm" style="width:100%;margin-top:6px" onclick="$('#compInput').click()">📷 ${EDITC.comprovanteFoto?'Trocar':'Bater'} foto do comprovante</button>
+  <div class="row" style="gap:6px;margin-top:6px">
+    <button class="btn sec sm" style="flex:1" onclick="$('#compInput').click()">📷 ${EDITC.comprovanteFoto?'Trocar':'Bater'} foto</button>
+    <button class="btn sec sm" style="flex:1" onclick="$('#compInputLib').click()">🖼️ Escolher da biblioteca</button>
+  </div>
   <button class="btn ia" id="btnIA" style="margin-top:8px" onclick="lerComprovanteIA()">🤖 Ler comprovante com IA</button>
   <div class="sec-tit">📝 Itens comprados</div>
   <div id="compItensBox"></div>
@@ -993,7 +1011,10 @@ function salvarCompra(){
   if(!EDITC.comprovanteFoto){alert("Bata a foto do comprovante — é obrigatório.");return;}
   if(!(EDITC.itens||[]).length){alert("Adicione pelo menos um item (ou use a IA).");return;}
   EDITC.itens.forEach((it,i)=>{it.valorTotal=(+it.qtd||0)*(+it.valorUnit||0);});
-  EDITC.eventoId=$("#cEvento")?$("#cEvento").value:(EDITC.eventoId||"");
+  const sel=$("#cEvento")?$("#cEvento").value:"";
+  if(sel.indexOf("ev:")===0){EDITC.eventoId=sel.slice(3);EDITC.empresaGeral="";}
+  else if(sel.indexOf("emp:")===0){EDITC.empresaGeral=sel.slice(4);EDITC.eventoId="";}
+  else {EDITC.eventoId="";EDITC.empresaGeral="";}
   // vinculada a um evento => a compra inteira entra no custo desse evento
   if(EDITC.eventoId)EDITC.aloc=EDITC.itens.map((it,i)=>({ev:EDITC.eventoId,it:i,qtd:+it.qtd||0}));
   const i=COMPRAS.findIndex(c=>c.id===EDITC.id);if(i>=0)COMPRAS[i]=EDITC;else COMPRAS.push(EDITC);
@@ -1004,7 +1025,7 @@ function abrirCompra(id){const c=COMPRAS.find(x=>x.id===id);if(!c)return;const a
   const evP=c.eventoId?SERVICOS.find(s=>s.id===c.eventoId):null;
   modal(`<h2 style="margin-bottom:2px">${esc(c.fornecedor||"—")}</h2>
     <p class="muted">${esc(c.data||"")} · ${brl(compraTotal(c))} · por ${esc(c.criadoPor||"")}</p>
-    ${evP?`<div class="info" style="cursor:pointer" onclick="abrirDetalhe('${evP.id}')">🎯 <b>Vinculada ao evento:</b> ${esc(evP.cliente||'evento')}${evP.evento?' · '+esc(evP.evento):''} · ${esc(evP.data||'')} ›</div>`:''}
+    ${evP?`<div class="info" style="cursor:pointer" onclick="abrirDetalhe('${evP.id}')">🎯 <b>Vinculada ao evento:</b> ${esc(evP.cliente||'evento')}${evP.evento?' · '+esc(evP.evento):''} · ${esc(evP.data||'')} ›</div>`:(c.empresaGeral?`<div class="info">🏢 <b>Empresa:</b> ${esc(CONTRATOS[c.empresaGeral]?CONTRATOS[c.empresaGeral].nome:c.empresaGeral)} (geral — sem evento específico)</div>`:'')}
     ${c.comprovanteFoto?`<img src="${c.comprovanteFoto}" class="comprov-foto" onclick="verFoto('${c.comprovanteFoto}')">`:'<div class="warn">Sem comprovante.</div>'}
     <div class="sec-tit">📝 Itens</div>
     <table class="tabela"><tr><th>Item</th><th>Qtd</th><th>R$/un</th><th style="text-align:right">Total</th></tr>${itens}</table>
