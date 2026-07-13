@@ -252,6 +252,7 @@ nav button.on{color:var(--lar);border-bottom-color:var(--lar)}
   <!-- ESTOQUE -->
   <div id="tab-estoque" class="wrap hide">
     <div class="info">Estoque atual. As <b>sobras das compras</b> caem aqui automaticamente.</div>
+    <button class="btn ia hide" id="btnLerNota" style="margin-bottom:8px;width:100%" onclick="lerNotaEstoque()">🤖 Ler nota/recibo e lançar no estoque</button>
     <button class="btn sm hide" id="btnAddEstoque" style="margin-bottom:12px" onclick="addEstoqueItem()">+ Item no estoque</button>
     <div id="listaEstoque"></div>
   </div>
@@ -331,7 +332,7 @@ const COL={ev:"vr_eventos", comp:"vr_compras", cont:"vr_contas", est:"vr_estoque
 let SERVICOS=[], COMPRAS=[], ESTOQUE=[], CONFIG=null, USER=null, FUNCIONARIOS=[], CONTAS=[], RECIBOS=[];
 const EMPRESA={nome:"Vr Refeições",cnpj:"27.731.980/0001-59",email:"marcelo@vrrefeicoes.com.br",tel:"(85) 8833-9998",end:"Rua Nossa Senhora da Glória, 1295, Barroso, Fortaleza-CE, 60862-585",pix:"27731980000159"};
 let SUBS=[]; // unsubscribes das escutas em tempo real
-let FILTRO_CONTRATO="todos", EDIT=null, EDITC=null, FOTO_ALVO=null, FILTRO_CONTA="aberto", EDITCONTA=null, EDITREC=null;
+let FILTRO_CONTRATO="todos", EDIT=null, EDITC=null, FOTO_ALVO=null, FILTRO_CONTA="aberto", EDITCONTA=null, EDITREC=null, EDITNOTA=null;
 const TIPOS_SERVICO=["Fornecedor / insumos","Freelancer / mão de obra","Aluguel","Energia / água","Combustível","Manutenção veículo","Equipamento / locação","Imposto / taxa","Telefone / internet","Contador","Outros"];
 const FORMAS_PAG=["PIX","Boleto","Transferência","Dinheiro","Cartão","Débito automático","Outro"];
 const PERM_MAP={contas:"permContas",recibos:"permRecibos",cmv:"permCmv",precos:"permPrecos"};
@@ -936,15 +937,17 @@ function renderCompras(){const host=$("#listaCompras");if(!host)return;
   host.innerHTML=lista.map(c=>{
     const nItens=(c.itens||[]).length;const evs=[...new Set((c.aloc||[]).map(a=>a.ev))].length;
     const sobra=(c.itens||[]).some((_,i)=>sobraItem(c,i)>0);
+    const evP=c.eventoId?SERVICOS.find(s=>s.id===c.eventoId):null;
     return `<div class="serv" onclick="abrirCompra('${c.id}')">
       <div class="top"><div>
         <div class="nome">${esc(c.fornecedor||"Sem fornecedor")}</div>
-        <div class="meta">${esc(c.data||"")} · ${nItens} itens ${evs?`· ${evs} evento(s)`:""}</div>
+        <div class="meta">${esc(c.data||"")} · ${nItens} itens ${!evP&&evs>1?`· ${evs} eventos`:""}</div>
+        ${evP?`<div class="meta" style="color:var(--lar);font-weight:700">🎯 ${esc(evP.cliente||'evento')}${evP.evento?' · '+esc(evP.evento):''}</div>`:(c.aloc&&c.aloc.length?'':'<div class="meta" style="color:var(--amarelo);font-weight:700">⚠ sem evento — não entra no custo</div>')}
       </div><div style="text-align:right"><b>${brl(compraTotal(c))}</b>${c.comprovanteFoto?'<div style="font-size:11px;color:var(--verde);font-weight:700">✅ comprovante</div>':'<div style="font-size:11px;color:var(--vermelho);font-weight:700">⚠ sem comprovante</div>'}</div></div>
       ${isAdmin()&&sobra?`<div class="meta" style="color:var(--amarelo);font-weight:700">📦 tem sobra pra desmembrar/estoque</div>`:""}</div>`;
   }).join("");
 }
-function novaCompra(){EDITC={id:uid(),criadoEm:Date.now(),criadoPor:USER.nome,data:hoje(),fornecedor:"",comprovanteFoto:null,itens:[],aloc:[],sobrasEnviadas:false};formCompra();}
+function novaCompra(){EDITC={id:uid(),criadoEm:Date.now(),criadoPor:USER.nome,data:hoje(),fornecedor:"",eventoId:"",comprovanteFoto:null,itens:[],aloc:[],sobrasEnviadas:false};formCompra();}
 function editarCompra(id){EDITC=JSON.parse(JSON.stringify(COMPRAS.find(c=>c.id===id)));fecharModal();formCompra();}
 function formCompra(){
   modal(`<h2 style="margin-bottom:12px">${COMPRAS.find(c=>c.id===EDITC.id)?"✏️ Editar compra":"🛒 Nova compra"}</h2>
@@ -952,6 +955,8 @@ function formCompra(){
     <div class="field"><label>Fornecedor</label><input id="cFornec" value="${esc(EDITC.fornecedor)}" placeholder="Ex: Atacadão, Chiquim..."></div>
     <div class="field" style="flex:0 0 140px"><label>Data</label><input type="date" id="cData" value="${esc(EDITC.data)}"></div>
   </div>
+  <div class="field"><label>🎯 Para qual evento? <span class="muted" style="text-transform:none">(a compra inteira entra no custo desse evento)</span></label>
+    <select id="cEvento"><option value="">— não vinculado / vários eventos —</option>${[...SERVICOS].sort((a,b)=>(b.data||'').localeCompare(a.data||'')).slice(0,60).map(s=>`<option value="${s.id}" ${EDITC.eventoId===s.id?'selected':''}>${esc(s.cliente||'evento')}${s.evento?' · '+esc(s.evento):''} · ${esc(s.data||'')}</option>`).join('')}</select></div>
   <div class="warn">📸 Foto do <b>comprovante (cupom/nota) é obrigatória</b> pra salvar.</div>
   <input type="file" accept="image/*" capture="environment" id="compInput" style="display:none" onchange="receberComprovante(this)">
   <div id="compFotoBox"></div>
@@ -987,13 +992,18 @@ function salvarCompra(){
   if(!EDITC.comprovanteFoto){alert("Bata a foto do comprovante — é obrigatório.");return;}
   if(!(EDITC.itens||[]).length){alert("Adicione pelo menos um item (ou use a IA).");return;}
   EDITC.itens.forEach((it,i)=>{it.valorTotal=(+it.qtd||0)*(+it.valorUnit||0);});
+  EDITC.eventoId=$("#cEvento")?$("#cEvento").value:(EDITC.eventoId||"");
+  // vinculada a um evento => a compra inteira entra no custo desse evento
+  if(EDITC.eventoId)EDITC.aloc=EDITC.itens.map((it,i)=>({ev:EDITC.eventoId,it:i,qtd:+it.qtd||0}));
   const i=COMPRAS.findIndex(c=>c.id===EDITC.id);if(i>=0)COMPRAS[i]=EDITC;else COMPRAS.push(EDITC);
   cloudSet(COL.comp,EDITC);EDITC=null;fecharModal();renderCompras();if(isAdmin())render();}
 
 function abrirCompra(id){const c=COMPRAS.find(x=>x.id===id);if(!c)return;const admin=isAdmin();const podeDesm=admin||podeVer('cmv');
   const itens=(c.itens||[]).map((it,i)=>`<tr><td>${esc(it.nome)}</td><td>${it.qtd} ${esc(it.unidade||'')}</td><td>${brl(it.valorUnit)}</td><td style="text-align:right"><b>${brl((+it.qtd||0)*(+it.valorUnit||0))}</b></td></tr>`).join("");
+  const evP=c.eventoId?SERVICOS.find(s=>s.id===c.eventoId):null;
   modal(`<h2 style="margin-bottom:2px">${esc(c.fornecedor||"—")}</h2>
     <p class="muted">${esc(c.data||"")} · ${brl(compraTotal(c))} · por ${esc(c.criadoPor||"")}</p>
+    ${evP?`<div class="info" style="cursor:pointer" onclick="abrirDetalhe('${evP.id}')">🎯 <b>Vinculada ao evento:</b> ${esc(evP.cliente||'evento')}${evP.evento?' · '+esc(evP.evento):''} · ${esc(evP.data||'')} ›</div>`:''}
     ${c.comprovanteFoto?`<img src="${c.comprovanteFoto}" class="comprov-foto" onclick="verFoto('${c.comprovanteFoto}')">`:'<div class="warn">Sem comprovante.</div>'}
     <div class="sec-tit">📝 Itens</div>
     <table class="tabela"><tr><th>Item</th><th>Qtd</th><th>R$/un</th><th style="text-align:right">Total</th></tr>${itens}</table>
@@ -1037,27 +1047,30 @@ function enviarSobras(cid){const c=COMPRAS.find(x=>x.id===cid);
 function excluirCompra(id){if(!confirm("Excluir esta compra?"))return;COMPRAS=COMPRAS.filter(c=>c.id!==id);cloudDel(COL.comp,id);fecharModal();renderCompras();render();}
 
 /* ---- IA: ler comprovante ---- */
-async function lerComprovanteIA(){
-  if(!EDITC.comprovanteFoto){alert("Bata a foto do comprovante primeiro.");return;}
-  if(!CONFIG.apiKey){await carregarConfigNuvem();}
-  if(!CONFIG.apiKey){alert("A leitura por IA ainda não foi ativada.\n\nO dono precisa entrar uma vez em ⚙️ Configurações e colar a chave da Anthropic — depois funciona pra todo mundo.");return;}
-  const btn=$("#btnIA");const txt=btn.innerHTML;btn.innerHTML=`<span class="spin"></span> Lendo comprovante...`;btn.disabled=true;
-  try{
-    const [meta,b64]=EDITC.comprovanteFoto.split(",");const media=(meta.match(/data:(.*?);/)||[])[1]||"image/jpeg";
-    const prompt=`Você é um leitor de cupom fiscal / nota de compra de alimentos e insumos. Extraia os itens comprados desta imagem.
+// ---- motor de IA compartilhado: lê cupom/nota/recibo e devolve {fornecedor,data,itens[]} ----
+async function iaLerItens(dataUrl){
+  if(!CONFIG.apiKey)await carregarConfigNuvem();
+  if(!CONFIG.apiKey)throw new Error("A leitura por IA ainda não foi ativada. O dono precisa colar a chave da Anthropic em ⚙️ Configurações.");
+  const [meta,b64]=(dataUrl||"").split(",");const media=(meta.match(/data:(.*?);/)||[])[1]||"image/jpeg";
+  const prompt=`Você é um leitor de cupom fiscal / nota fiscal / recibo de compra de alimentos e insumos. Extraia os itens comprados desta imagem.
 Responda APENAS com um JSON válido, sem texto antes ou depois, no formato:
 {"fornecedor":"nome da loja","data":"AAAA-MM-DD","itens":[{"nome":"","qtd":0,"unidade":"un|kg|g|L|ml|cx|pct|dz|fardo","valorUnit":0,"valorTotal":0}]}
 Regras: valores numéricos com ponto decimal; não invente itens; se não achar a data use vazio; agrupe descrições parecidas.`;
-    const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",
-      headers:{"content-type":"application/json","x-api-key":CONFIG.apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-      body:JSON.stringify({model:CONFIG.modelo||"claude-sonnet-5",max_tokens:2000,messages:[{role:"user",content:[{type:"image",source:{type:"base64",media_type:media,data:b64}},{type:"text",text:prompt}]}]})});
-    if(!res.ok){const er=await res.text();throw new Error("API "+res.status+": "+er.slice(0,180));}
-    const data=await res.json();
-    // o modelo pode devolver bloco de "pensamento" + texto; pega só o(s) bloco(s) de texto
-    let t=((data.content||[]).filter(c=>c.type==="text").map(c=>c.text||"").join("")||"").trim();
-    t=t.replace(/```json/gi,"").replace(/```/g,"").trim();
-    const a=t.indexOf("{"),z=t.lastIndexOf("}");if(a>=0&&z>a)t=t.slice(a,z+1); // isola o JSON
-    const obj=JSON.parse(t);
+  const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",
+    headers:{"content-type":"application/json","x-api-key":CONFIG.apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+    body:JSON.stringify({model:CONFIG.modelo||"claude-sonnet-5",max_tokens:2000,messages:[{role:"user",content:[{type:"image",source:{type:"base64",media_type:media,data:b64}},{type:"text",text:prompt}]}]})});
+  if(!res.ok){const er=await res.text();throw new Error("API "+res.status+": "+er.slice(0,180));}
+  const data=await res.json();
+  let t=((data.content||[]).filter(c=>c.type==="text").map(c=>c.text||"").join("")||"").trim();
+  t=t.replace(/```json/gi,"").replace(/```/g,"").trim();
+  const a=t.indexOf("{"),z=t.lastIndexOf("}");if(a>=0&&z>a)t=t.slice(a,z+1);
+  return JSON.parse(t);
+}
+async function lerComprovanteIA(){
+  if(!EDITC.comprovanteFoto){alert("Bata a foto do comprovante primeiro.");return;}
+  const btn=$("#btnIA");const txt=btn.innerHTML;btn.innerHTML=`<span class="spin"></span> Lendo comprovante...`;btn.disabled=true;
+  try{
+    const obj=await iaLerItens(EDITC.comprovanteFoto);
     if(obj.fornecedor&&!$("#cFornec").value)$("#cFornec").value=obj.fornecedor;
     if(obj.data&&/^\d{4}-\d{2}-\d{2}$/.test(obj.data))$("#cData").value=obj.data;
     (obj.itens||[]).forEach(it=>EDITC.itens.push({nome:it.nome||"",qtd:+it.qtd||0,unidade:it.unidade||"un",valorUnit:+it.valorUnit||0,valorTotal:+it.valorTotal|| (+it.qtd||0)*(+it.valorUnit||0)}));
@@ -1076,6 +1089,7 @@ function estoqueEntrada(nome,un,qtd,custoUnit){
 }
 function renderEstoque(){const host=$("#listaEstoque");if(!host)return;const admin=isAdmin();const verRS=admin||(USER&&USER.permPrecos);
   const ab=$("#btnAddEstoque");if(ab)ab.classList.toggle("hide",!admin);
+  const bn=$("#btnLerNota");if(bn)bn.classList.toggle("hide",!admin);
   if(!ESTOQUE.length){host.innerHTML=`<div class="empty"><div class="ic">📦</div>Estoque vazio.<br>${admin?'Lance o <b>estoque inicial</b> ou deixe as sobras das compras entrarem.':'As sobras das compras entram aqui.'}</div>`;return;}
   const val=ESTOQUE.reduce((t,e)=>t+(+e.qtd||0)*(+e.custoUnit||0),0);
   host.innerHTML=(verRS?`<div class="card" style="padding:12px"><div style="display:flex;justify-content:space-between"><b>Valor total em estoque</b><b style="color:var(--lar)">${brl(val)}</b></div></div>`:'')+
@@ -1107,6 +1121,48 @@ function salvarEstoque(id){const nome=$("#eNome").value.trim();if(!nome){alert("
   e.nome=nome;e.unidade=$("#eUn").value;e.qtd=+$("#eQtd").value||0;e.custoUnit=+$("#eCusto").value||0;e.minimo=+$("#eMin").value||0;e.atualizadoEm=hoje();
   cloudSet(COL.est,e);fecharModal();renderEstoque();}
 function delEstoque(id){if(!confirm("Excluir item do estoque?"))return;ESTOQUE=ESTOQUE.filter(x=>x.id!==id);cloudDel(COL.est,id);fecharModal();renderEstoque();}
+/* ---- Ler nota/recibo com IA e lançar no estoque ---- */
+function lerNotaEstoque(){EDITNOTA={foto:null,itens:[]};formNotaEstoque();}
+function formNotaEstoque(){
+  modal(`<h2 style="margin-bottom:8px">🤖 Ler nota e lançar no estoque</h2>
+    <p class="hint" style="margin-bottom:10px">Tire uma foto da nota fiscal / cupom / recibo. A IA lê os produtos e você confere antes de lançar no estoque.</p>
+    <input type="file" accept="image/*,application/pdf" id="ntInput" style="display:none" onchange="receberNotaFoto(this)">
+    <div id="ntFotoBox"></div>
+    <button class="btn sec sm" style="width:100%;margin-top:6px" onclick="$('#ntInput').click()">📷 ${EDITNOTA.foto?'Trocar':'Bater'} foto da nota</button>
+    <button class="btn ia" id="ntBtnIA" style="margin-top:8px" onclick="lerNotaIA()">🤖 Ler com IA</button>
+    <div class="sec-tit">📦 Produtos que vão pro estoque</div>
+    <div id="ntItensBox"></div>
+    <button class="btn sec sm" style="width:100%" onclick="addItemNota()">+ Adicionar item</button>
+    <button class="btn gh" style="margin-top:14px" onclick="lancarNotaEstoque()">📦 Lançar no estoque</button>
+    <button class="btn sec" style="margin-top:8px" onclick="fecharModal()">Cancelar</button>`);
+  renderNotaFoto();renderNotaItens();}
+function receberNotaFoto(input){const file=input.files&&input.files[0];if(!file)return;input.value="";
+  const reader=new FileReader();reader.onload=e=>{const img=new Image();img.onload=()=>{
+    const max=1400;let w=img.width,h=img.height;if(w>h&&w>max){h=h*max/w;w=max;}else if(h>max){w=w*max/h;h=max;}
+    const cv=document.createElement("canvas");cv.width=w;cv.height=h;cv.getContext("2d").drawImage(img,0,0,w,h);
+    EDITNOTA.foto=cv.toDataURL("image/jpeg",0.7);renderNotaFoto();};img.src=e.target.result;};reader.readAsDataURL(file);}
+function renderNotaFoto(){const b=$("#ntFotoBox");if(!b)return;b.innerHTML=EDITNOTA.foto?`<img src="${EDITNOTA.foto}" class="comprov-foto" onclick="verFoto('${EDITNOTA.foto}')">`:'';}
+function renderNotaItens(){const b=$("#ntItensBox");if(!b)return;
+  b.innerHTML=(EDITNOTA.itens||[]).map((it,i)=>`<div class="item-linha">
+    <input class="nm" value="${esc(it.nome)}" placeholder="produto" oninput="EDITNOTA.itens[${i}].nome=this.value">
+    <input class="qtd" type="number" inputmode="decimal" value="${esc(it.qtd)}" placeholder="qtd" oninput="EDITNOTA.itens[${i}].qtd=this.value">
+    <select class="un" onchange="EDITNOTA.itens[${i}].unidade=this.value">${UNIDADES.map(u=>`<option ${it.unidade===u?'selected':''}>${u}</option>`).join("")}</select>
+    <input class="vl" type="number" inputmode="decimal" value="${esc(it.custoUnit)}" placeholder="R$/un" oninput="EDITNOTA.itens[${i}].custoUnit=this.value">
+    <button class="x" onclick="EDITNOTA.itens.splice(${i},1);renderNotaItens()">✕</button></div>`).join("")||`<p class="muted" style="font-size:13px;text-align:center;padding:6px">Nenhum produto ainda. Use a IA ou adicione na mão.</p>`;}
+function addItemNota(){EDITNOTA.itens.push({nome:"",qtd:1,unidade:"un",custoUnit:0});renderNotaItens();}
+async function lerNotaIA(){
+  if(!EDITNOTA.foto){alert("Bata a foto da nota primeiro.");return;}
+  const btn=$("#ntBtnIA");const txt=btn.innerHTML;btn.innerHTML=`<span class="spin"></span> Lendo nota...`;btn.disabled=true;
+  try{
+    const obj=await iaLerItens(EDITNOTA.foto);
+    (obj.itens||[]).forEach(it=>EDITNOTA.itens.push({nome:it.nome||"",qtd:+it.qtd||0,unidade:it.unidade||"un",custoUnit:+it.valorUnit||0}));
+    renderNotaItens();
+    btn.innerHTML="✅ "+(obj.itens||[]).length+" produtos lidos";setTimeout(()=>{btn.innerHTML=txt;btn.disabled=false;},2500);
+  }catch(e){alert("Não consegui ler com a IA.\n\n"+e.message);btn.innerHTML=txt;btn.disabled=false;}}
+function lancarNotaEstoque(){const its=(EDITNOTA.itens||[]).filter(i=>i.nome&&(+i.qtd));
+  if(!its.length){alert("Nenhum produto pra lançar. Leia a nota ou adicione itens.");return;}
+  its.forEach(i=>estoqueEntrada(i.nome,i.unidade,+i.qtd||0,+i.custoUnit||0));
+  EDITNOTA=null;fecharModal();renderEstoque();setTimeout(()=>alert(its.length+" produto(s) lançado(s) no estoque ✅"),100);}
 
 /* ===================== PREÇOS (variação) ===================== */
 function renderPrecos(){const host=$("#listaPrecos");if(!host)return;
