@@ -278,6 +278,14 @@ nav button.on{color:var(--lar);border-bottom-color:var(--lar)}
     <div id="listaContas"></div>
   </div>
 
+  <!-- CMV -->
+  <div id="tab-cmv" class="wrap hide">
+    <div class="field" style="margin-bottom:10px"><select id="filtroMesCMV" onchange="renderCMV()"></select></div>
+    <div class="info">CMV = Custo ÷ Vendas · <b style="color:#2ec27a">≤50% ótimo</b> · <b style="color:#e0a23a">51–65% atenção</b> · <b style="color:#e2554b">&gt;65% alto</b> (padrão do ERP Total Food)</div>
+    <div class="kpis" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px" id="cmvKpis"></div>
+    <div id="cmvTabela"></div>
+  </div>
+
   <!-- RECIBOS -->
   <div id="tab-recibos" class="wrap hide">
     <button class="btn" style="margin-bottom:14px" onclick="novoRecibo()">🧾 Novo recibo</button>
@@ -460,15 +468,15 @@ function iniciar(){
 
 function montarNav(){
   const abas=isAdmin()
-    ? [["painel","📊 Painel"],["eventos","📋 Eventos"],["compras","🛒 Compras"],["contas","💳 Contas"],["recibos","🧾 Recibos"],["estoque","📦 Estoque"],["precos","💲 Preços"]]
+    ? [["painel","📊 Painel"],["eventos","📋 Eventos"],["compras","🛒 Compras"],["contas","💳 Contas"],["recibos","🧾 Recibos"],["cmv","🧮 CMV"],["estoque","📦 Estoque"],["precos","💲 Preços"]]
     : [["painelf","🏠 Início"],["eventos","📋 Eventos"],["compras","🛒 Compras"],["estoque","📦 Estoque"]];
   $("#nav").innerHTML=abas.map(([k,l])=>`<button data-tab="${k}" onclick="tab('${k}')">${l}</button>`).join("");
 }
 
 /* ===================== NAV ===================== */
-const TABS=["painel","painelf","eventos","compras","contas","recibos","estoque","precos","novo","config"];
+const TABS=["painel","painelf","eventos","compras","contas","recibos","cmv","estoque","precos","novo","config"];
 function tab(t){
-  if((t==="precos"||t==="config"||t==="painel"||t==="contas"||t==="recibos")&&!isAdmin())t="eventos";
+  if((t==="precos"||t==="config"||t==="painel"||t==="contas"||t==="recibos"||t==="cmv")&&!isAdmin())t="eventos";
   CURRENT_TAB=t;
   document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("on",b.dataset.tab===t));
   TABS.forEach(x=>$("#tab-"+x).classList.toggle("hide",x!==t));
@@ -477,6 +485,7 @@ function tab(t){
   if(t==="compras")renderCompras();
   if(t==="contas")renderContas();
   if(t==="recibos")renderRecibos();
+  if(t==="cmv")renderCMV();
   if(t==="estoque")renderEstoque();
   if(t==="precos")renderPrecos();
   if(t==="config")renderConfig();
@@ -489,9 +498,9 @@ function montarFiltroMes(){
   const meses=[...new Set(SERVICOS.map(mesDe).filter(Boolean))].sort().reverse();
   const atual=hoje().slice(0,7);
   if(!meses.includes(atual))meses.unshift(atual);
-  const sel=$("#filtroMes");if(!sel)return;
-  sel.innerHTML=`<option value="__all">Todos os meses</option>`+meses.map(m=>`<option value="${m}">${nomeMes(m)}</option>`).join("");
-  sel.value=atual;
+  const opts=`<option value="__all">Todos os meses</option>`+meses.map(m=>`<option value="${m}">${nomeMes(m)}</option>`).join("");
+  const sel=$("#filtroMes");if(sel){sel.innerHTML=opts;sel.value=atual;}
+  const selC=$("#filtroMesCMV");if(selC){const v=selC.value;selC.innerHTML=opts;selC.value=v||atual;}
 }
 function servicosDoMes(){const m=$("#filtroMes")?$("#filtroMes").value:"__all";return m==="__all"?SERVICOS:SERVICOS.filter(s=>mesDe(s)===m);}
 
@@ -1179,6 +1188,36 @@ function abrirConta(id){const c=CONTAS.find(x=>x.id===id);if(!c)return;const st=
     <button class="btn sec" style="margin-top:8px" onclick="fecharModal()">Fechar</button>`);}
 function excluirConta(id){if(!confirm("Excluir esta conta?"))return;CONTAS=CONTAS.filter(c=>c.id!==id);cloudDel(COL.cont,id);fecharModal();renderContas();render();}
 
+/* ===================== CMV (padrão ERP Total Food) ===================== */
+function cmvCor(v){return v==null?'var(--cinza)':(v<=50?'#2ec27a':(v<=65?'#e0a23a':'#e2554b'));}
+function cmvDe(vendas,custo){return vendas>0?custo/vendas*100:null;}
+function renderCMV(){const sel=$("#filtroMesCMV");const m=sel?sel.value:'__all';
+  const lista=(m==='__all'||!m)?SERVICOS:SERVICOS.filter(s=>mesDe(s)===m);
+  const dias={};lista.forEach(s=>{const d=s.data||'—';(dias[d]=dias[d]||{ev:0,v:0,c:0});dias[d].ev++;dias[d].v+=faturamento(s);dias[d].c+=custoTotal(s);});
+  let totV=0,totC=0;Object.values(dias).forEach(d=>{totV+=d.v;totC+=d.c;});const cmvMes=cmvDe(totV,totC);
+  const k=$("#cmvKpis");if(k)k.innerHTML=`
+    <div class="kpi o"><div class="v" style="font-size:18px">${brlk(totV)}</div><div class="l">Vendas</div></div>
+    <div class="kpi r"><div class="v" style="font-size:18px">${brlk(totC)}</div><div class="l">Custo (CMV R$)</div></div>
+    <div class="kpi"><div class="v" style="font-size:18px;color:${cmvCor(cmvMes)}">${cmvMes!=null?cmvMes.toFixed(1)+'%':'—'}</div><div class="l">CMV médio</div></div>`;
+  const linhas=Object.keys(dias).sort((a,b)=>b.localeCompare(a)).map(d=>{const o=dias[d];const cmv=cmvDe(o.v,o.c);
+    return `<tr onclick="abrirDiaCMV('${d}')"><td><b>${esc(d)}</b></td><td style="text-align:center">${o.ev}</td><td style="text-align:right">${brl(o.v)}</td><td style="text-align:right">${brl(o.c)}</td><td style="text-align:right;color:${cmvCor(cmv)};font-weight:800">${cmv!=null?cmv.toFixed(1)+'%':'—'}</td></tr>`;}).join('');
+  const t=$("#cmvTabela");if(t)t.innerHTML=Object.keys(dias).length?`<table class="tabela"><tr><th>Dia</th><th style="text-align:center">Ev.</th><th style="text-align:right">Vendas</th><th style="text-align:right">Custo</th><th style="text-align:right">CMV%</th></tr>${linhas}</table>`:`<div class="empty"><div class="ic">🧮</div>Sem eventos no período.</div>`;
+}
+function abrirDiaCMV(dia){const evs=SERVICOS.filter(s=>(s.data||'—')===dia);let v=0,c=0;evs.forEach(s=>{v+=faturamento(s);c+=custoTotal(s);});const cmv=cmvDe(v,c);
+  modal(`<h3>🧮 CMV do dia ${esc(dia)}</h3>
+    <div class="resumo"><div class="li"><span>Vendas do dia</span><b>${brl(v)}</b></div>
+      <div class="li"><span>Custo do dia</span><b class="neg">− ${brl(c)}</b></div>
+      <div class="li tot"><span>CMV do dia</span><b style="color:${cmvCor(cmv)}">${cmv!=null?cmv.toFixed(1)+'%':'—'}</b></div></div>
+    <table class="tabela"><tr><th>Evento</th><th style="text-align:right">Venda</th><th style="text-align:right">Custo</th><th style="text-align:right">CMV%</th></tr>
+    ${evs.map(s=>{const cm=cmvDe(faturamento(s),custoTotal(s));return `<tr><td>${esc(s.cliente||'—')}${s.evento?'<div class="muted" style="font-size:11px">'+esc(s.evento)+'</div>':''}</td><td style="text-align:right">${brl(faturamento(s))}</td><td style="text-align:right">${brl(custoTotal(s))}</td><td style="text-align:right;color:${cmvCor(cm)};font-weight:800">${cm!=null?cm.toFixed(1)+'%':'—'}</td></tr>`;}).join('')}</table>
+    <button class="btn gh" style="margin-top:14px" onclick="enviarCMVdia('${dia}')">📤 Enviar CMV do dia (WhatsApp)</button>
+    <button class="btn sec" style="margin-top:8px" onclick="fecharModal()">Fechar</button>`);}
+function enviarCMVdia(dia){const evs=SERVICOS.filter(s=>(s.data||'—')===dia);let v=0,c=0;evs.forEach(s=>{v+=faturamento(s);c+=custoTotal(s);});const cmv=cmvDe(v,c);
+  let txt=`*CMV do dia ${dia} — ${EMPRESA.nome}*\n\n`;
+  evs.forEach(s=>{const cm=cmvDe(faturamento(s),custoTotal(s));txt+=`• ${s.cliente||'—'}${s.evento?' ('+s.evento+')':''}: venda ${brl(faturamento(s))} · custo ${brl(custoTotal(s))} · CMV ${cm!=null?cm.toFixed(1)+'%':'—'}\n`;});
+  txt+=`\n*Vendas:* ${brl(v)}\n*Custo:* ${brl(c)}\n*CMV do dia:* ${cmv!=null?cmv.toFixed(1)+'%':'—'}`;
+  window.open('https://wa.me/?text='+encodeURIComponent(txt),'_blank');}
+
 /* ===================== RECIBOS ===================== */
 function reciboTotal(r){return (r.itens||[]).reduce((t,i)=>t+(+i.v||0)*(+i.q||0),0);}
 function proxNumRecibo(){let mx=0;RECIBOS.forEach(r=>{const n=parseInt(r.num,10);if(!isNaN(n)&&n>mx)mx=n;});return mx?String(mx+1):"";}
@@ -1336,6 +1375,7 @@ function refreshUI(){if(!USER)return;const t=CURRENT_TAB;
   else if(t==="compras")renderCompras();
   else if(t==="contas")renderContas();
   else if(t==="recibos")renderRecibos();
+  else if(t==="cmv")renderCMV();
   else if(t==="estoque")renderEstoque();
   else if(t==="precos")renderPrecos();}
 async function resolverPapel(user){
