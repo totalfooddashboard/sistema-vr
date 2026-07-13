@@ -384,6 +384,7 @@ function faturamento(s){return (s.itens||[]).reduce((t,i)=>t+(+i.qtd||0)*(+i.val
 function custoLogistica(s){const l=s.logistica||{};return (+l.combustivelValor||0)+(+l.pedagio||0);}
 function custoGastos(s){return (s.gastos||[]).reduce((t,g)=>t+(+g.valor||0),0);}
 function custoComprasAloc(evId){let t=0;COMPRAS.forEach(c=>{(c.aloc||[]).forEach(a=>{if(a.ev===evId){const it=(c.itens||[])[a.it];if(it)t+=(+a.qtd||0)*(+it.valorUnit||0);}});});return t;}
+function comprasDoEvento(evId){const out=[];COMPRAS.forEach(c=>{let v=0,its=[];(c.aloc||[]).forEach(a=>{if(a.ev===evId){const it=(c.itens||[])[a.it];if(it){v+=(+a.qtd||0)*(+it.valorUnit||0);its.push((it.nome||'')+' '+a.qtd+' '+(it.unidade||''));}}});if(v>0)out.push({compra:c,valor:v,its:its});});return out;}
 function custoTotal(s){return custoLogistica(s)+custoGastos(s)+custoComprasAloc(s.id);}
 function margem(s){return faturamento(s)-custoTotal(s);}
 function kmRodado(s){const l=s.logistica||{};return Math.max(0,(+l.kmFinal||0)-(+l.kmInicial||0));}
@@ -889,6 +890,8 @@ function abrirDetalhe(id){const s=SERVICOS.find(x=>x.id===id);if(!s)return;const
     <div class="sec-tit">💸 Custos</div>
     ${(s.gastos||[]).map(g=>`<div style="display:flex;justify-content:space-between;font-size:13.5px;padding:4px 0;border-bottom:1px dashed var(--linha)"><span>${esc(g.descricao||g.categoria)}</span><b>${brl(g.valor)}</b></div>`).join("")}
     ${custoComprasAloc(s.id)?`<div style="display:flex;justify-content:space-between;font-size:13.5px;padding:4px 0;border-bottom:1px dashed var(--linha)"><span>🛒 Compras desmembradas</span><b>${brl(custoComprasAloc(s.id))}</b></div>`:''}`:"";
+  const cdev=comprasDoEvento(s.id);
+  const compBloco=(!admin && podeVer('cmv') && cdev.length)?`<div class="sec-tit">🛒 Compras usadas neste evento</div>${cdev.map(o=>`<div style="display:flex;justify-content:space-between;font-size:13.5px;padding:4px 0;border-bottom:1px dashed var(--linha);cursor:pointer" onclick="abrirCompra('${o.compra.id}')"><span>${esc(o.compra.fornecedor||'compra')} · ${esc(o.compra.data||'')}<div class="muted" style="font-size:11px">${esc(o.its.join(', '))}</div></span><b>${brl(o.valor)}</b></div>`).join('')}<div style="display:flex;justify-content:space-between;padding:6px 0;font-weight:800"><span>Custo de compras (entra no CMV)</span><b>${brl(custoComprasAloc(s.id))}</b></div>`:'';
   const podeEd=podeEditarEvento(s);
   const alt=s.solicAlteracao;
   const bannerAlt = (admin&&alt&&alt.status==='pendente')?`<div class="warn"><b>✋ ${esc(alt.por||'Funcionário')}</b> pediu autorização pra alterar:<br>"${esc(alt.motivo||'')}"<br><button class="btn sm gh" style="margin-top:8px" onclick="liberarAlteracao('${s.id}')">✅ Liberar alteração</button></div>`
@@ -903,6 +906,7 @@ function abrirDetalhe(id){const s=SERVICOS.find(x=>x.id===id);if(!s)return;const
     ${bannerAlt}
     ${pedidoBloco}
     ${finBloco}
+    ${compBloco}
     <div class="sec-tit">🚗 Logística</div>
     <div style="font-size:13.5px">${s.logistica.veiculo?`<div>Veículo: <b>${esc(s.logistica.veiculo)}</b></div>`:""}${s.logistica.motorista?`<div>Motorista: <b>${esc(s.logistica.motorista)}</b></div>`:""}
       <div>KM: ${esc(s.logistica.kmInicial||"?")} → ${esc(s.logistica.kmFinal||"?")} = <b>${kmRodado(s)} km</b></div>
@@ -986,14 +990,14 @@ function salvarCompra(){
   const i=COMPRAS.findIndex(c=>c.id===EDITC.id);if(i>=0)COMPRAS[i]=EDITC;else COMPRAS.push(EDITC);
   cloudSet(COL.comp,EDITC);EDITC=null;fecharModal();renderCompras();if(isAdmin())render();}
 
-function abrirCompra(id){const c=COMPRAS.find(x=>x.id===id);if(!c)return;const admin=isAdmin();
+function abrirCompra(id){const c=COMPRAS.find(x=>x.id===id);if(!c)return;const admin=isAdmin();const podeDesm=admin||podeVer('cmv');
   const itens=(c.itens||[]).map((it,i)=>`<tr><td>${esc(it.nome)}</td><td>${it.qtd} ${esc(it.unidade||'')}</td><td>${brl(it.valorUnit)}</td><td style="text-align:right"><b>${brl((+it.qtd||0)*(+it.valorUnit||0))}</b></td></tr>`).join("");
   modal(`<h2 style="margin-bottom:2px">${esc(c.fornecedor||"—")}</h2>
     <p class="muted">${esc(c.data||"")} · ${brl(compraTotal(c))} · por ${esc(c.criadoPor||"")}</p>
     ${c.comprovanteFoto?`<img src="${c.comprovanteFoto}" class="comprov-foto" onclick="verFoto('${c.comprovanteFoto}')">`:'<div class="warn">Sem comprovante.</div>'}
     <div class="sec-tit">📝 Itens</div>
     <table class="tabela"><tr><th>Item</th><th>Qtd</th><th>R$/un</th><th style="text-align:right">Total</th></tr>${itens}</table>
-    ${admin?blocoDesmembrar(c):""}
+    ${podeDesm?blocoDesmembrar(c):""}
     <div class="row" style="margin-top:18px">
       <button class="btn sec" onclick="editarCompra('${c.id}')">✏️ Editar</button>
       ${admin?`<button class="btn rd" onclick="excluirCompra('${c.id}')">🗑️ Excluir</button>`:""}
