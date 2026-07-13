@@ -131,6 +131,41 @@ nav button.on{color:var(--lar);border-bottom-color:var(--lar)}
 .spin{display:inline-block;width:16px;height:16px;border:2.5px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;vertical-align:middle}
 @keyframes sp{to{transform:rotate(360deg)}}
 .est-baixo{color:var(--vermelho);font-weight:800}
+
+/* ---- Recibo (impressão) ---- */
+#reciboPrint{display:none}
+.rcb{background:#fff;color:#111;font-size:13.5px}
+.rcb .top{display:flex;align-items:flex-start;gap:14px;border-bottom:2px solid var(--lar);padding-bottom:12px}
+.rcb .top img{height:66px;width:66px;object-fit:contain}
+.rcb .emp .nome{font-size:23px;font-weight:800;color:var(--lar-esc);line-height:1}
+.rcb .emp .l{font-size:11.5px;color:#333;margin-top:3px;line-height:1.4}
+.rcb .num{text-align:right;margin-left:auto}
+.rcb .num .lb{font-size:10px;color:#666;letter-spacing:1px}
+.rcb .num .n{font-size:26px;font-weight:800;color:var(--lar-esc)}
+.rcb .titulo{text-align:center;font-size:17px;font-weight:800;letter-spacing:3px;color:var(--lar-esc);margin:16px 0 12px}
+.rcb .dados{line-height:1.7}.rcb .dados b{display:inline-block;min-width:74px}
+.rcb table{width:100%;border-collapse:collapse;margin:14px 0 6px;font-size:13px}
+.rcb th{background:var(--lar);color:#fff;text-align:left;padding:8px 10px;font-size:11.5px}
+.rcb th.r,.rcb td.r{text-align:right}.rcb th.c,.rcb td.c{text-align:center}
+.rcb td{padding:8px 10px;border-bottom:1px solid #e5e7eb}
+.rcb .bottom{display:flex;justify-content:space-between;gap:18px;margin-top:12px}
+.rcb .conf{font-size:12px;color:#333;flex:1;line-height:1.6}
+.rcb .tot{flex:0 0 230px}
+.rcb .tot .li{display:flex;justify-content:space-between;padding:2px 0}
+.rcb .tot .fim{border-top:2px solid var(--lar);margin-top:6px;padding-top:7px;font-size:18px;font-weight:800;color:var(--lar-esc)}
+.rcb .pix{margin-top:18px;border:2px solid var(--lar);border-radius:10px;padding:11px 13px;background:#f2f8f5}
+.rcb .pix .t{font-size:11px;font-weight:800;color:var(--lar);letter-spacing:1px}
+.rcb .pix .chave{font-size:19px;font-weight:800;color:var(--lar-esc);margin-top:2px}
+.rcb .pix .s{font-size:11.5px;color:#555}
+.rcb .assin{margin-top:54px;text-align:center}
+.rcb .assin .l{width:270px;border-top:1px solid #333;margin:0 auto;padding-top:6px;font-size:12.5px;font-weight:700}
+.rcb .foot{margin-top:30px;text-align:center;font-size:11.5px;color:#555;border-top:1px solid #e5e7eb;padding-top:9px}
+@media print{
+  @page{size:A4;margin:0}
+  body>*:not(#reciboPrint){display:none!important}
+  #reciboPrint{display:block!important}
+  .rcb{padding:14mm}
+}
 </style>
 
 <!-- ================= LOGIN ================= -->
@@ -243,6 +278,12 @@ nav button.on{color:var(--lar);border-bottom-color:var(--lar)}
     <div id="listaContas"></div>
   </div>
 
+  <!-- RECIBOS -->
+  <div id="tab-recibos" class="wrap hide">
+    <button class="btn" style="margin-bottom:14px" onclick="novoRecibo()">🧾 Novo recibo</button>
+    <div id="listaRecibos"></div>
+  </div>
+
   <!-- FORM EVENTO -->
   <div id="tab-novo" class="wrap hide"><div id="formServico"></div></div>
 
@@ -253,6 +294,7 @@ nav button.on{color:var(--lar);border-bottom-color:var(--lar)}
 </div>
 
 <div id="modalHost"></div>
+<div id="reciboPrint"></div>
 
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
@@ -276,10 +318,11 @@ catch(e){ console.warn("Firebase falhou:",e); }
 <script>
 /* ===================== SISTEMA VR ===================== */
 const K_CONF="vr_config_v1"; // só config local (chave IA/modelo) — dados ficam na nuvem
-const COL={ev:"vr_eventos", comp:"vr_compras", cont:"vr_contas", est:"vr_estoque", user:"vr_usuarios"};
-let SERVICOS=[], COMPRAS=[], ESTOQUE=[], CONFIG=null, USER=null, FUNCIONARIOS=[], CONTAS=[];
+const COL={ev:"vr_eventos", comp:"vr_compras", cont:"vr_contas", est:"vr_estoque", user:"vr_usuarios", rec:"vr_recibos"};
+let SERVICOS=[], COMPRAS=[], ESTOQUE=[], CONFIG=null, USER=null, FUNCIONARIOS=[], CONTAS=[], RECIBOS=[];
+const EMPRESA={nome:"Vr Refeições",cnpj:"27.731.980/0001-59",email:"marcelo@vrrefeicoes.com.br",tel:"(85) 8833-9998",end:"Rua Nossa Senhora da Glória, 1295, Barroso, Fortaleza-CE, 60862-585",pix:"27731980000159"};
 let SUBS=[]; // unsubscribes das escutas em tempo real
-let FILTRO_CONTRATO="todos", EDIT=null, EDITC=null, FOTO_ALVO=null, FILTRO_CONTA="aberto", EDITCONTA=null;
+let FILTRO_CONTRATO="todos", EDIT=null, EDITC=null, FOTO_ALVO=null, FILTRO_CONTA="aberto", EDITCONTA=null, EDITREC=null;
 const TIPOS_SERVICO=["Fornecedor / insumos","Freelancer / mão de obra","Aluguel","Energia / água","Combustível","Manutenção veículo","Equipamento / locação","Imposto / taxa","Telefone / internet","Contador","Outros"];
 
 const CONF_PADRAO={apiKey:"", modelo:"claude-sonnet-5", empresa:"Restaurantes VR"};
@@ -356,7 +399,7 @@ function iniciarEscutas(){
   escutar(COL.comp, a=>COMPRAS=a);
   escutar(COL.cont, a=>CONTAS=a);
   escutar(COL.est, a=>ESTOQUE=a);
-  if(isAdmin())escutar(COL.user, a=>FUNCIONARIOS=a.filter(u=>u.role==="func"));
+  if(isAdmin()){escutar(COL.user, a=>FUNCIONARIOS=a.filter(u=>u.role==="func")); escutar(COL.rec, a=>RECIBOS=a);}
 }
 
 /* ===================== LOGIN ===================== */
@@ -417,15 +460,15 @@ function iniciar(){
 
 function montarNav(){
   const abas=isAdmin()
-    ? [["painel","📊 Painel"],["eventos","📋 Eventos"],["compras","🛒 Compras"],["contas","💳 Contas"],["estoque","📦 Estoque"],["precos","💲 Preços"]]
+    ? [["painel","📊 Painel"],["eventos","📋 Eventos"],["compras","🛒 Compras"],["contas","💳 Contas"],["recibos","🧾 Recibos"],["estoque","📦 Estoque"],["precos","💲 Preços"]]
     : [["painelf","🏠 Início"],["eventos","📋 Eventos"],["compras","🛒 Compras"]];
   $("#nav").innerHTML=abas.map(([k,l])=>`<button data-tab="${k}" onclick="tab('${k}')">${l}</button>`).join("");
 }
 
 /* ===================== NAV ===================== */
-const TABS=["painel","painelf","eventos","compras","contas","estoque","precos","novo","config"];
+const TABS=["painel","painelf","eventos","compras","contas","recibos","estoque","precos","novo","config"];
 function tab(t){
-  if((t==="estoque"||t==="precos"||t==="config"||t==="painel"||t==="contas")&&!isAdmin())t="eventos";
+  if((t==="estoque"||t==="precos"||t==="config"||t==="painel"||t==="contas"||t==="recibos")&&!isAdmin())t="eventos";
   CURRENT_TAB=t;
   document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("on",b.dataset.tab===t));
   TABS.forEach(x=>$("#tab-"+x).classList.toggle("hide",x!==t));
@@ -433,6 +476,7 @@ function tab(t){
   if(t==="novo"&&!EDIT)novoServico();
   if(t==="compras")renderCompras();
   if(t==="contas")renderContas();
+  if(t==="recibos")renderRecibos();
   if(t==="estoque")renderEstoque();
   if(t==="precos")renderPrecos();
   if(t==="config")renderConfig();
@@ -817,6 +861,7 @@ function abrirDetalhe(id){const s=SERVICOS.find(x=>x.id===id);if(!s)return;const
              :`<button class="btn" style="background:var(--amarelo)" onclick="solicitarAlteracao('${s.id}')">🔓 Solicitar autorização pra alterar</button>`}
       <button class="btn sec" onclick="duplicarClienteDia('${s.id}')">➕ Outro deste cliente</button>
     </div>
+    ${admin?`<button class="btn" style="margin-top:8px;background:var(--azul)" onclick="gerarReciboDeEvento('${s.id}')">🧾 Gerar recibo deste pedido</button>`:''}
     ${admin?`<button class="btn rd" style="margin-top:8px" onclick="excluirServico('${s.id}')">🗑️ Excluir</button>`:`<p class="hint" style="text-align:center;margin-top:10px">Só o dono pode excluir pedidos.</p>`}
     <button class="btn sec" style="margin-top:8px" onclick="fecharModal()">Fechar</button>`);}
 function atrasoTxt(s){const p=s.comprovacao.horaPrevista,r=s.comprovacao.horaChegada;if(!p||!r)return"";
@@ -1099,6 +1144,72 @@ function abrirConta(id){const c=CONTAS.find(x=>x.id===id);if(!c)return;const st=
     <button class="btn sec" style="margin-top:8px" onclick="fecharModal()">Fechar</button>`);}
 function excluirConta(id){if(!confirm("Excluir esta conta?"))return;CONTAS=CONTAS.filter(c=>c.id!==id);cloudDel(COL.cont,id);fecharModal();renderContas();render();}
 
+/* ===================== RECIBOS ===================== */
+function reciboTotal(r){return (r.itens||[]).reduce((t,i)=>t+(+i.v||0)*(+i.q||0),0);}
+function proxNumRecibo(){let mx=0;RECIBOS.forEach(r=>{const n=parseInt(r.num,10);if(!isNaN(n)&&n>mx)mx=n;});return mx?String(mx+1):"";}
+function fmtCnpjPix(v){v=(v||"").replace(/\D/g,"");return v.length===14?v.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/,"$1.$2.$3/$4-$5"):v;}
+function dataExtBR(iso){if(!iso)return"";const M=["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"];const p=iso.split("-");return (+p[2])+" de "+M[+p[1]-1]+" de "+p[0];}
+function reciboHTML(r){const total=reciboTotal(r);
+  const linhas=(r.itens||[]).filter(i=>i.d||i.v).map(i=>`<tr><td>${esc(i.d)}</td><td class="r">${brl(i.v)}</td><td class="c">${(+i.q||0)}</td><td class="r">${brl((+i.v||0)*(+i.q||0))}</td></tr>`).join("");
+  return `<div class="rcb">
+    <div class="top"><img src="logo.png" onerror="this.style.display='none'">
+      <div class="emp"><div class="nome">${EMPRESA.nome}</div><div class="l">CNPJ: ${EMPRESA.cnpj}<br>${EMPRESA.email} · ${EMPRESA.tel}<br>${EMPRESA.end}</div></div>
+      <div class="num"><div class="lb">RECIBO</div><div class="n">Nº ${esc(r.num||"—")}</div></div></div>
+    <div class="titulo">RECIBO DE PAGAMENTO</div>
+    <div class="dados"><div><b>Data:</b> ${dataExtBR(r.data)}</div><div><b>Cliente:</b> ${esc(r.cliente||"")}</div>
+      ${r.cnpj?`<div><b>CPF/CNPJ:</b> ${esc(r.cnpj)}</div>`:""}${r.endereco?`<div><b>Endereço:</b> ${esc(r.endereco)}</div>`:""}${r.referente?`<div><b>Referente:</b> ${esc(r.referente)}</div>`:""}</div>
+    <table><tr><th>Descrição</th><th class="r">Valor unit.</th><th class="c">Qtd</th><th class="r">Total</th></tr>${linhas||'<tr><td colspan="4">—</td></tr>'}</table>
+    <div class="bottom"><div class="conf">Confirmamos o recebimento total dos produtos/serviços descritos neste recibo.<br><br><b>Condições:</b> ${esc(r.cond||"À vista")}<br><b>Formas:</b> ${esc(r.formas||"")}</div>
+      <div class="tot"><div class="li"><span>Valor Total</span><span>${brl(total)}</span></div><div class="li fim"><span>Valor Final</span><span>${brl(total)}</span></div></div></div>
+    ${(r.pix||EMPRESA.pix)?`<div class="pix"><div class="t">PAGAMENTO VIA PIX</div><div class="chave">${esc(fmtCnpjPix(r.pix||EMPRESA.pix))}</div><div class="s">Chave PIX (CNPJ) · Favorecido: ${EMPRESA.nome}</div></div>`:""}
+    <div class="assin"><div class="l">${EMPRESA.nome} — CNPJ ${EMPRESA.cnpj}</div></div>
+    <div class="foot"><b>${EMPRESA.nome}</b> · CNPJ ${EMPRESA.cnpj} · Fortaleza-CE</div></div>`;}
+function renderRecibos(){const host=$("#listaRecibos");if(!host)return;
+  let lista=[...RECIBOS].sort((a,b)=>(b.criadoEm||0)-(a.criadoEm||0));
+  if(!lista.length){host.innerHTML=`<div class="empty"><div class="ic">🧾</div>Nenhum recibo emitido.<br>Toque em <b>Novo recibo</b>.</div>`;return;}
+  host.innerHTML=lista.map(r=>`<div class="serv" onclick="abrirRecibo('${r.id}')"><div class="top"><div><div class="nome">Nº ${esc(r.num||"—")} · ${esc(r.cliente||"—")}</div><div class="meta">${esc(r.data||"")} ${r.emailCliente?"· ✉️ "+esc(r.emailCliente):""}</div></div><b style="align-self:center">${brl(reciboTotal(r))}</b></div></div>`).join("");}
+function novoRecibo(){EDITREC={id:uid(),criadoEm:Date.now(),criadoPor:USER.nome,num:proxNumRecibo(),data:hoje(),cliente:"",emailCliente:"",cnpj:"",endereco:"",referente:"",itens:[{d:"",v:"",q:1}],cond:"À vista",formas:"PIX, Dinheiro, Cartão de Crédito, Cartão de Débito",pix:EMPRESA.pix};formRecibo();}
+function editarRecibo(id){EDITREC=JSON.parse(JSON.stringify(RECIBOS.find(r=>r.id===id)));fecharModal();formRecibo();}
+function gerarReciboDeEvento(id){const s=SERVICOS.find(x=>x.id===id);if(!s)return;
+  EDITREC={id:uid(),criadoEm:Date.now(),criadoPor:USER.nome,num:proxNumRecibo(),data:hoje(),cliente:s.cliente||"",emailCliente:"",cnpj:"",endereco:s.local||"",referente:s.evento||(CONTRATOS[s.contrato]?CONTRATOS[s.contrato].nome:""),itens:(s.itens||[]).filter(i=>+i.qtd).map(i=>({d:i.nome,v:+i.valor||0,q:+i.qtd||0})),cond:"À vista",formas:"PIX, Dinheiro, Cartão de Crédito, Cartão de Débito",pix:EMPRESA.pix};
+  fecharModal();tab("recibos");formRecibo();}
+function formRecibo(){const r=EDITREC;
+  modal(`<h2 style="margin-bottom:12px">🧾 ${RECIBOS.find(x=>x.id===r.id)?"Editar":"Novo"} recibo</h2>
+    <div class="row"><div class="field"><label>Recibo nº</label><input id="rNum" value="${esc(r.num)}"></div><div class="field"><label>Data</label><input type="date" id="rData" value="${esc(r.data)}"></div></div>
+    <div class="field"><label>Cliente</label><input id="rCli" value="${esc(r.cliente)}"></div>
+    <div class="row"><div class="field"><label>CPF/CNPJ</label><input id="rCnpj" value="${esc(r.cnpj)}"></div><div class="field"><label>Email do cliente</label><input id="rEmail" type="email" value="${esc(r.emailCliente)}" placeholder="cliente@email.com"></div></div>
+    <div class="field"><label>Endereço</label><input id="rEnd" value="${esc(r.endereco)}"></div>
+    <div class="field"><label>Referente a (opcional)</label><input id="rRef" value="${esc(r.referente)}" placeholder="Ex: Coffee break 02/07"></div>
+    <div class="sec-tit">Itens</div><div id="rItens"></div>
+    <button class="btn sec sm" style="width:100%" onclick="addItemRec()">+ Item</button>
+    <div style="text-align:right;margin-top:8px;font-weight:800">Total: <span id="rTot" style="color:var(--lar)">R$ 0,00</span></div>
+    <div class="sec-tit">Pagamento</div>
+    <div class="field"><label>Condições</label><input id="rCond" value="${esc(r.cond)}"></div>
+    <div class="field"><label>Formas</label><input id="rForm" value="${esc(r.formas)}"></div>
+    <div class="field"><label>Chave PIX (CNPJ)</label><input id="rPix" value="${esc(r.pix)}"></div>
+    <button class="btn gh" onclick="salvarRecibo(true)">💾 Emitir e salvar</button>
+    <div class="row" style="margin-top:8px"><button class="btn" onclick="imprimirRecibo()">🖨️ Imprimir/PDF</button><button class="btn" style="background:var(--azul)" onclick="emailRecibo()">📧 Email</button></div>
+    <button class="btn sec" style="margin-top:8px" onclick="fecharModal()">Fechar</button>`);
+  renderItensRec();recTotLive();}
+function renderItensRec(){const b=$("#rItens");if(!b)return;
+  b.innerHTML=EDITREC.itens.map((it,i)=>`<div class="item-linha"><input class="nm" value="${esc(it.d)}" placeholder="descrição" oninput="EDITREC.itens[${i}].d=this.value"><input class="vl" type="number" inputmode="decimal" value="${esc(it.v)}" placeholder="R$" oninput="EDITREC.itens[${i}].v=this.value;recTotLive()"><input class="qtd" type="number" inputmode="decimal" value="${esc(it.q)}" placeholder="qtd" oninput="EDITREC.itens[${i}].q=this.value;recTotLive()"><button class="x" onclick="EDITREC.itens.splice(${i},1);renderItensRec();recTotLive()">✕</button></div>`).join("");}
+function addItemRec(){coletarRecibo();EDITREC.itens.push({d:"",v:"",q:1});renderItensRec();}
+function recTotLive(){const el=$("#rTot");if(el)el.textContent=brl(reciboTotal(EDITREC));}
+function coletarRecibo(){if(!$("#rNum"))return;const r=EDITREC;r.num=$("#rNum").value;r.data=$("#rData").value;r.cliente=$("#rCli").value.trim();r.cnpj=$("#rCnpj").value.trim();r.emailCliente=$("#rEmail").value.trim();r.endereco=$("#rEnd").value.trim();r.referente=$("#rRef").value.trim();r.cond=$("#rCond").value;r.formas=$("#rForm").value;r.pix=$("#rPix").value.trim();}
+function salvarRecibo(aviso){coletarRecibo();if(!EDITREC.cliente){alert("Coloque o cliente.");return;}cloudSet(COL.rec,EDITREC);if(aviso){fecharModal();tab("recibos");alert("Recibo emitido e salvo ✅");}}
+function imprimirRecibo(){coletarRecibo();if(!EDITREC.cliente){alert("Coloque o cliente.");return;}salvarRecibo(false);$("#reciboPrint").innerHTML=reciboHTML(EDITREC);setTimeout(()=>window.print(),250);}
+function emailRecibo(){coletarRecibo();if(!EDITREC.cliente){alert("Coloque o cliente.");return;}salvarRecibo(false);const r=EDITREC;const total=reciboTotal(r);
+  const corpo=`Olá!%0D%0A%0D%0ASegue o recibo Nº ${r.num} da ${EMPRESA.nome}.%0D%0A%0D%0A`+(r.itens||[]).filter(i=>i.d).map(i=>`- ${i.d}: ${i.q} x ${brl(i.v)} = ${brl((+i.v||0)*(+i.q||0))}`).join("%0D%0A")+`%0D%0A%0D%0ATOTAL: ${brl(total)}%0D%0A%0D%0APAGAMENTO VIA PIX%0D%0AChave (CNPJ): ${fmtCnpjPix(r.pix||EMPRESA.pix)}%0D%0AFavorecido: ${EMPRESA.nome}%0D%0A%0D%0A(Recibo em PDF em anexo.)%0D%0A%0D%0A${EMPRESA.nome} — CNPJ ${EMPRESA.cnpj}`;
+  window.location.href=`mailto:${encodeURIComponent(r.emailCliente||"")}?subject=${encodeURIComponent("Recibo Nº "+r.num+" - "+EMPRESA.nome)}&body=${corpo}`;}
+function abrirRecibo(id){const r=RECIBOS.find(x=>x.id===id);if(!r)return;EDITREC=JSON.parse(JSON.stringify(r));
+  modal(`<h3>Recibo Nº ${esc(r.num)}</h3><p class="muted">${esc(r.cliente)} · ${brl(reciboTotal(r))}</p>
+    <div style="border:1px solid var(--linha);border-radius:10px;overflow:auto;max-height:46vh;padding:8px;margin:10px 0">${reciboHTML(r)}</div>
+    <button class="btn" onclick="imprimirRecibo()">🖨️ Imprimir / Salvar PDF</button>
+    <div class="row" style="margin-top:8px"><button class="btn" style="background:var(--azul)" onclick="emailRecibo()">📧 Enviar email</button><button class="btn sec" onclick="editarRecibo('${r.id}')">✏️ Editar</button></div>
+    <button class="btn rd" style="margin-top:8px" onclick="excluirRecibo('${r.id}')">🗑️ Excluir</button>
+    <button class="btn sec" style="margin-top:8px" onclick="fecharModal()">Fechar</button>`);}
+function excluirRecibo(id){if(!confirm("Excluir este recibo?"))return;RECIBOS=RECIBOS.filter(r=>r.id!==id);cloudDel(COL.rec,id);fecharModal();renderRecibos();}
+
 /* ===================== CONFIG ===================== */
 function renderConfig(){if(!isAdmin())return;
   $("#formConfig").innerHTML=`<h2 style="margin-bottom:12px">⚙️ Configurações</h2>
@@ -1189,6 +1300,7 @@ function refreshUI(){if(!USER)return;const t=CURRENT_TAB;
   if(t==="painel"||t==="painelf"||t==="eventos")render();
   else if(t==="compras")renderCompras();
   else if(t==="contas")renderContas();
+  else if(t==="recibos")renderRecibos();
   else if(t==="estoque")renderEstoque();
   else if(t==="precos")renderPrecos();}
 async function resolverPapel(user){
