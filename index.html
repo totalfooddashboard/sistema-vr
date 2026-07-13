@@ -338,6 +338,7 @@ const FORMAS_PAG=["PIX","Boleto","Transferência","Dinheiro","Cartão","Débito 
 const PERM_MAP={contas:"permContas",recibos:"permRecibos",cmv:"permCmv",precos:"permPrecos"};
 function podeVer(tab){if(isAdmin())return true;if(!USER)return false;if(tab==="estoque"||tab==="eventos"||tab==="compras"||tab==="painelf")return true;
   return !!USER[PERM_MAP[tab]];}
+const podeGerEstoque=()=>isAdmin()||(USER&&USER.permEstoque===true);
 const podeContas=()=>podeVer("contas");
 
 const CONF_PADRAO={apiKey:"", modelo:"claude-sonnet-5", empresa:"Restaurantes VR"};
@@ -1087,18 +1088,18 @@ function estoqueEntrada(nome,un,qtd,custoUnit){
   else {e={id:uid(),nome:nome,unidade:un||"un",qtd:+qtd||0,custoUnit:+custoUnit||0,minimo:0,atualizadoEm:hoje()};ESTOQUE.push(e);}
   cloudSet(COL.est,e);
 }
-function renderEstoque(){const host=$("#listaEstoque");if(!host)return;const admin=isAdmin();const verRS=admin||(USER&&USER.permPrecos);
-  const ab=$("#btnAddEstoque");if(ab)ab.classList.toggle("hide",!admin);
-  const bn=$("#btnLerNota");if(bn)bn.classList.toggle("hide",!admin);
+function renderEstoque(){const host=$("#listaEstoque");if(!host)return;const admin=isAdmin();const ger=podeGerEstoque();const verRS=admin||ger||(USER&&USER.permPrecos);
+  const ab=$("#btnAddEstoque");if(ab)ab.classList.toggle("hide",!ger);
+  const bn=$("#btnLerNota");if(bn)bn.classList.toggle("hide",!ger);
   if(!ESTOQUE.length){host.innerHTML=`<div class="empty"><div class="ic">📦</div>Estoque vazio.<br>${admin?'Lance o <b>estoque inicial</b> ou deixe as sobras das compras entrarem.':'As sobras das compras entram aqui.'}</div>`;return;}
   const val=ESTOQUE.reduce((t,e)=>t+(+e.qtd||0)*(+e.custoUnit||0),0);
   host.innerHTML=(verRS?`<div class="card" style="padding:12px"><div style="display:flex;justify-content:space-between"><b>Valor total em estoque</b><b style="color:var(--lar)">${brl(val)}</b></div></div>`:'')+
-    `<table class="tabela"><tr><th>Item</th><th>Qtd</th>${verRS?'<th>R$/un</th>':''}${admin?'<th></th>':''}</tr>`+
+    `<table class="tabela"><tr><th>Item</th><th>Qtd</th>${verRS?'<th>R$/un</th>':''}${ger?'<th></th>':''}</tr>`+
     [...ESTOQUE].sort((a,b)=>norm(a.nome).localeCompare(norm(b.nome))).map(e=>{
       const baixo=e.minimo&&(+e.qtd<=+e.minimo);
       return `<tr><td><b>${esc(e.nome)}</b>${baixo?' <span class="est-baixo">⚠ baixo</span>':''}<div class="muted" style="font-size:11px">atual. ${esc(e.atualizadoEm||'')}</div></td>
         <td class="${baixo?'est-baixo':''}">${e.qtd} ${esc(e.unidade)}</td>
-        ${verRS?`<td>${brl(e.custoUnit)}</td>`:''}${admin?`<td style="text-align:right"><button class="btn sm sec" onclick="editEstoque('${e.id}')">ajustar</button></td>`:''}</tr>`;
+        ${verRS?`<td>${brl(e.custoUnit)}</td>`:''}${ger?`<td style="text-align:right"><button class="btn sm sec" onclick="editEstoque('${e.id}')">ajustar</button></td>`:''}</tr>`;
     }).join("")+`</table>`;
 }
 function addEstoqueItem(){editEstoque(null);}
@@ -1414,7 +1415,7 @@ function renderConfig(){if(!isAdmin())return;
 }
 function renderFuncBox(){const b=$("#funcBox");if(!b)return;
   if(!FUNCIONARIOS.length){b.innerHTML=`<p class="muted" style="font-size:13px;text-align:center;padding:8px">Nenhum funcionário cadastrado ainda.</p>`;return;}
-  b.innerHTML=FUNCIONARIOS.map(f=>{const ics=[f.permContas?'💳':'',f.permRecibos?'🧾':'',f.permCmv?'🧮':'',f.permPrecos?'💲':''].join('');
+  b.innerHTML=FUNCIONARIOS.map(f=>{const ics=[f.permContas?'💳':'',f.permRecibos?'🧾':'',f.permCmv?'🧮':'',f.permPrecos?'💲':'',f.permEstoque?'📦':''].join('');
    return `<div class="item-linha" style="background:${f.ativo===false?'#f8fafc':'#fff'};flex-wrap:wrap">
     <div class="nm" style="flex:1 1 100%">${esc(f.nome)}${f.ativo===false?' <span class="muted" style="font-weight:600">(inativo)</span>':''}${ics?' <span class="tag" style="background:var(--amar-claro);color:#b45309;font-size:11px">'+ics+'</span>':''}<div class="muted" style="font-size:11px;font-weight:600">${esc(f.email||'')}</div></div>
     <button class="btn sm sec" style="flex:0 0 auto" onclick="reenviarSenhaFunc('${esc(f.email)}')">📧 senha</button>
@@ -1427,12 +1428,13 @@ function editarAcessos(id){const f=FUNCIONARIOS.find(x=>x.id===id);if(!f)return;
     <label class="check"><input type="checkbox" id="acC" ${f.permContas?'checked':''}><span>💳 Contas a pagar</span></label>
     <label class="check"><input type="checkbox" id="acR" ${f.permRecibos?'checked':''}><span>🧾 Recibos</span></label>
     <label class="check"><input type="checkbox" id="acM" ${f.permCmv?'checked':''}><span>🧮 CMV</span></label>
-    <label class="check"><input type="checkbox" id="acP" ${f.permPrecos?'checked':''}><span>💲 Preços (e valores do estoque)</span></label>
-    <button class="btn sec sm" style="width:100%;margin:8px 0" onclick="document.querySelectorAll('#acC,#acR,#acM,#acP').forEach(c=>c.checked=true)">🧑‍💼 Marcar todos (Gerente)</button>
+    <label class="check"><input type="checkbox" id="acP" ${f.permPrecos?'checked':''}><span>💲 Preços</span></label>
+    <label class="check"><input type="checkbox" id="acS" ${f.permEstoque?'checked':''}><span>📦 Lançar/ajustar Estoque (ler nota, +item, valores)</span></label>
+    <button class="btn sec sm" style="width:100%;margin:8px 0" onclick="document.querySelectorAll('#acC,#acR,#acM,#acP,#acS').forEach(c=>c.checked=true)">🧑‍💼 Marcar todos (Gerente)</button>
     <button class="btn gh" onclick="salvarAcessos('${id}')">Salvar acessos</button>
     <button class="btn sec" style="margin-top:8px" onclick="fecharModal()">Cancelar</button>`);}
 function salvarAcessos(id){const f=FUNCIONARIOS.find(x=>x.id===id);if(!f)return;
-  f.permContas=$("#acC").checked;f.permRecibos=$("#acR").checked;f.permCmv=$("#acM").checked;f.permPrecos=$("#acP").checked;
+  f.permContas=$("#acC").checked;f.permRecibos=$("#acR").checked;f.permCmv=$("#acM").checked;f.permPrecos=$("#acP").checked;f.permEstoque=$("#acS").checked;
   cloudSet(COL.user,f);fecharModal();renderFuncBox();}
 function addFuncionario(){
   modal(`<h3>👷 Cadastrar funcionário</h3>
@@ -1440,7 +1442,7 @@ function addFuncionario(){
     <div class="field"><label>Nome</label><input id="fnNome" placeholder="Ex: João da Silva"></div>
     <div class="field"><label>Email</label><input id="fnEmail" type="email" inputmode="email" placeholder="joao@vrrefeicoes.com.br"></div>
     <div class="field"><label>Senha temporária (mín. 6)</label><input id="fnSenha" placeholder="Ex: joao123456"></div>
-    <label class="check" style="margin-bottom:12px"><input type="checkbox" id="fnGerente"><span>🧑‍💼 Gerente — acesso a Contas, Recibos, CMV e Preços</span></label>
+    <label class="check" style="margin-bottom:12px"><input type="checkbox" id="fnGerente"><span>🧑‍💼 Gerente — Contas, Recibos, CMV, Preços e Estoque</span></label>
     <button class="btn gh" id="fnBtn" onclick="salvarFuncionario()">Criar acesso</button>
     <button class="btn sec" style="margin-top:8px" onclick="fecharModal()">Cancelar</button>`);}
 async function salvarFuncionario(){
@@ -1454,7 +1456,7 @@ async function salvarFuncionario(){
     const cred=await sec.auth().createUserWithEmailAndPassword(email,senha);
     const uid=cred.user.uid; await sec.auth().signOut();
     const g=!!($("#fnGerente")&&$("#fnGerente").checked);
-    await cloudSet(COL.user,{id:uid,uid:uid,email:email,nome:nome,role:"func",ativo:true,permContas:g,permRecibos:g,permCmv:g,permPrecos:g,criadoEm:Date.now()});
+    await cloudSet(COL.user,{id:uid,uid:uid,email:email,nome:nome,role:"func",ativo:true,permContas:g,permRecibos:g,permCmv:g,permPrecos:g,permEstoque:g,criadoEm:Date.now()});
     fecharModal();alert("Funcionário criado ✅\nEle já pode entrar com o email:\n"+email);
   }catch(e){const c=((e.code)||"")+"";
     if(c.indexOf("email-already-in-use")>=0)alert("Esse email já tem conta. Se for da equipe, peça pra usar 'esqueci minha senha'.");
@@ -1507,7 +1509,7 @@ function refreshUI(){if(!USER)return;const t=CURRENT_TAB;
 async function resolverPapel(user){
   if((user.email||"").toLowerCase()===ADMIN_EMAIL)return {papel:"admin",nome:"Marcelo"};
   try{const d=await DB.collection(COL.user).doc(user.uid).get();
-    if(d.exists){const x=d.data();if(x.ativo===false)return {bloqueado:true};return {papel:x.role||"func",nome:x.nome||user.email,permContas:!!x.permContas,permRecibos:!!x.permRecibos,permCmv:!!x.permCmv,permPrecos:!!x.permPrecos};}}catch(e){}
+    if(d.exists){const x=d.data();if(x.ativo===false)return {bloqueado:true};return {papel:x.role||"func",nome:x.nome||user.email,permContas:!!x.permContas,permRecibos:!!x.permRecibos,permCmv:!!x.permCmv,permPrecos:!!x.permPrecos,permEstoque:!!x.permEstoque};}}catch(e){}
   return {papel:"func",nome:user.email};
 }
 carregarConfLocal();
@@ -1517,7 +1519,7 @@ if(FB_OK){
       const b=$("#btnEntrar");if(b){b.textContent="Entrar";b.disabled=false;}return;}
     const r=await resolverPapel(user);
     if(r.bloqueado){alert("Seu acesso foi desativado. Fale com o gestor.");AUTH.signOut();return;}
-    USER={uid:user.uid,email:user.email,nome:r.nome,papel:r.papel,permContas:!!r.permContas,permRecibos:!!r.permRecibos,permCmv:!!r.permCmv,permPrecos:!!r.permPrecos};
+    USER={uid:user.uid,email:user.email,nome:r.nome,papel:r.papel,permContas:!!r.permContas,permRecibos:!!r.permRecibos,permCmv:!!r.permCmv,permPrecos:!!r.permPrecos,permEstoque:!!r.permEstoque};
     if(r.papel==="admin")cloudSet(COL.user,{id:user.uid,uid:user.uid,email:user.email,nome:r.nome,role:"admin",ativo:true});
     iniciar();
   });
