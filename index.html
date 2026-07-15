@@ -332,7 +332,7 @@ const COL={ev:"vr_eventos", comp:"vr_compras", cont:"vr_contas", est:"vr_estoque
 let SERVICOS=[], COMPRAS=[], ESTOQUE=[], CONFIG=null, USER=null, FUNCIONARIOS=[], CONTAS=[], RECIBOS=[];
 const EMPRESA={nome:"Vr Refeições",cnpj:"27.731.980/0001-59",email:"marcelo@vrrefeicoes.com.br",tel:"(85) 8833-9998",end:"Rua Nossa Senhora da Glória, 1295, Barroso, Fortaleza-CE, 60862-585",pix:"27731980000159"};
 let SUBS=[]; // unsubscribes das escutas em tempo real
-let FILTRO_CONTRATO="todos", EDIT=null, EDITC=null, FOTO_ALVO=null, FILTRO_CONTA="aberto", EDITCONTA=null, EDITREC=null, EDITNOTA=null;
+let FILTRO_CONTRATO="todos", EDIT=null, EDITC=null, FOTO_ALVO=null, FOTO_ORIGEM="camera", FILTRO_CONTA="aberto", EDITCONTA=null, EDITREC=null, EDITNOTA=null;
 const TIPOS_SERVICO=["Fornecedor / insumos","Freelancer / mão de obra","Aluguel","Energia / água","Combustível","Manutenção veículo","Equipamento / locação","Imposto / taxa","Telefone / internet","Contador","Outros"];
 const FORMAS_PAG=["PIX","Boleto","Transferência","Dinheiro","Cartão","Débito automático","Outro"];
 const PERM_MAP={contas:"permContas",recibos:"permRecibos",cmv:"permCmv",precos:"permPrecos"};
@@ -621,7 +621,8 @@ function novoServico(){
   renderForm();
 }
 /* ---- rastreio de alteração de pedido lançado ---- */
-const podeAlterarLancado=()=>isAdmin()||(USER&&USER.permAlterar===true);
+// Gerente (quem tem CMV) já pode alterar por padrão; permAlterar liga pra quem não é gerente.
+const podeAlterarLancado=()=>isAdmin()||(USER&&(USER.permAlterar===true||USER.permCmv===true));
 function podeEditarEvento(s){ if(isAdmin())return true; if(!s.lancado)return true; if(podeAlterarLancado())return true; return !!(s.solicAlteracao&&s.solicAlteracao.status==='liberado'); }
 function snapshotEvento(s){return {itens:JSON.parse(JSON.stringify(s.itens||[])),data:s.data||"",horaEvento:s.horaEvento||"",local:s.local||"",pessoas:s.pessoas||"",descricaoPedido:s.descricaoPedido||"",total:faturamento(s),quando:new Date().toISOString(),por:(USER&&USER.nome)||""};}
 function mapaItens(arr){const m={};(arr||[]).forEach(it=>{if(!it||!it.nome)return;const k=norm(it.nome);
@@ -693,13 +694,16 @@ function renderForm(){
     <div style="text-align:right;margin-top:8px;font-weight:800">Total do pedido: <span id="fatLive" style="color:var(--lar)">R$ 0,00</span></div>
     ${secSolicitacao(s)}`
    : (admin?`
-    <div class="sec-tit">🧾 Itens do pedido (faturamento)</div>
+    <div class="sec-tit">🍽️ Cardápio / itens do evento (faturamento)</div>
     <input type="file" accept="image/*,application/pdf" id="ctrInput" style="display:none" onchange="receberContrato(this)">
     <button class="btn ia" id="btnIAContrato" onclick="$('#ctrInput').click()">🤖 Ler contrato com IA (foto ou PDF)</button>
     <p class="hint" style="margin:6px 0 10px">A IA lê o contrato/proposta e preenche <b>os itens que serão servidos</b>, os <b>materiais</b> e os <b>detalhes</b> do evento.${s.contratoNome?` <span style="color:var(--verde);font-weight:700">📄 lido: ${esc(s.contratoNome)}</span>`:''}</p>
-    <button class="catalogo-btn" onclick="abrirCatalogo()">+ Adicionar item do catálogo ${c.nome}</button>
+    <p class="hint" style="margin-bottom:8px">Cada linha: <b>item</b> · <b>quantidade</b> · <b>R$ por unidade</b> — o total sai sozinho.</p>
     <div id="itensBox"></div>
-    <button class="btn sec sm" style="width:100%;margin-top:4px" onclick="addItemLivre()">+ Item avulso (digitar)</button>
+    <div class="row" style="gap:6px;margin-top:4px">
+      <button class="btn sec sm" style="flex:1" onclick="addItemLivre()">+ Adicionar item do cardápio</button>
+      <button class="btn sec sm" style="flex:1" onclick="abrirCatalogo()">📖 Pegar do catálogo</button>
+    </div>
     <div style="text-align:right;margin-top:8px;font-weight:800">Faturamento: <span id="fatLive" style="color:var(--lar)">R$ 0,00</span></div>`:'');
   const secGastos=admin?`
     <div class="sec-tit">💸 Gastos diretos (custo)</div>
@@ -748,10 +752,16 @@ function renderForm(){
   <div id="checkBox" style="margin-bottom:12px">${CHECKLIST.map((t,i)=>`<div class="check ${s.comprovacao.checklist['c'+i]?'done':''}" onclick="toggleCheck(${i})"><input type="checkbox" ${s.comprovacao.checklist['c'+i]?'checked':''} onclick="event.stopPropagation();toggleCheck(${i})"><span>${t}</span></div>`).join("")}</div>
   <label>Fotos (data/hora e local são carimbados na imagem)</label>
   <input type="file" accept="image/*" capture="environment" id="fotoInput" style="display:none" onchange="receberFoto(this)">
-  <div class="row" style="margin-bottom:8px">
+  <input type="file" accept="image/*" id="fotoInputLib" style="display:none" onchange="receberFoto(this)">
+  <div class="row" style="margin-bottom:6px">
     <button class="btn sec sm" style="width:100%" onclick="tirarFoto('Chegada')">📷 Chegada</button>
     <button class="btn sec sm" style="width:100%" onclick="tirarFoto('Montagem')">📷 Montagem</button>
     <button class="btn sec sm" style="width:100%" onclick="tirarFoto('Entrega')">📷 Entrega</button>
+  </div>
+  <div class="row" style="margin-bottom:8px">
+    <button class="btn sec sm" style="width:100%" onclick="fotoDaBiblioteca('Chegada')">🖼️ Chegada</button>
+    <button class="btn sec sm" style="width:100%" onclick="fotoDaBiblioteca('Montagem')">🖼️ Montagem</button>
+    <button class="btn sec sm" style="width:100%" onclick="fotoDaBiblioteca('Entrega')">🖼️ Entrega</button>
   </div>
   <div class="fotos-grid" id="fotosGrid"></div>
   <div class="field" style="margin-top:12px"><label>Observações</label><textarea id="cObs" rows="2" placeholder="Intercorrências, elogios, ajustes...">${esc(s.comprovacao.obs)}</textarea></div>
@@ -846,13 +856,14 @@ function renderItens(){const box=$("#itensBox");if(!box)return;
   const catN=usaGrid?catNames(EDIT.contrato):null;
   const linhas=EDIT.itens.map((it,i)=>({it,i})).filter(o=>usaGrid?!catN.has(norm(o.it.nome)):true);
   box.innerHTML=linhas.map(({it,i})=>`<div class="item-linha">
-    <div class="nm">${esc(it.nome)}</div>
+    <input class="nm" value="${esc(it.nome)}" placeholder="item do cardápio" oninput="EDIT.itens[${i}].nome=this.value">
     <input class="qtd" type="number" inputmode="decimal" value="${esc(it.qtd)}" placeholder="qtd" oninput="EDIT.itens[${i}].qtd=this.value;calcLive();itot(${i})">
-    <input class="vl" type="number" inputmode="decimal" value="${esc(it.valor)}" placeholder="R$" oninput="EDIT.itens[${i}].valor=this.value;calcLive();itot(${i})">
+    <input class="vl" type="number" inputmode="decimal" value="${esc(it.valor)}" placeholder="R$/un" oninput="EDIT.itens[${i}].valor=this.value;calcLive();itot(${i})">
     <div class="tt" id="ittot${i}">${brl((+it.qtd||0)*(+it.valor||0))}</div>
-    <button class="x" onclick="EDIT.itens.splice(${i},1);renderItens();${usaGrid?'renderGridPedido();':''}calcLive()">✕</button></div>`).join("")||(usaGrid?'':`<p class="muted" style="font-size:13px;text-align:center;padding:6px">Nenhum item.</p>`);}
+    <button class="x" onclick="EDIT.itens.splice(${i},1);renderItens();${usaGrid?'renderGridPedido();':''}calcLive()">✕</button></div>`).join("")||(usaGrid?'':`<p class="muted" style="font-size:13px;text-align:center;padding:6px">Nenhum item ainda — use a IA, o catálogo, ou "+ Adicionar item do cardápio".</p>`);}
 function itot(i){const it=EDIT.itens[i];const el=$("#ittot"+i);if(el)el.textContent=brl((+it.qtd||0)*(+it.valor||0));}
-function addItemLivre(){EDIT.itens.push({nome:"Item",qtd:1,valor:0});renderItens();calcLive();setTimeout(()=>{const nm=$("#itensBox").querySelectorAll(".nm");const last=nm[nm.length-1];if(last){last.contentEditable=true;last.style.borderBottom="1px dashed var(--lar)";last.focus();last.onblur=()=>{EDIT.itens[EDIT.itens.length-1].nome=last.textContent.trim()||"Item";};}},50);}
+function addItemLivre(){coletarForm();EDIT.itens.push({nome:"",qtd:1,valor:0});renderItens();calcLive();
+  setTimeout(()=>{const nm=$("#itensBox").querySelectorAll("input.nm");const last=nm[nm.length-1];if(last)last.focus();},50);}
 function abrirCatalogo(){coletarForm();const cat=CONTRATOS[EDIT.contrato].cat;
   modal(`<h3>Catálogo ${CONTRATOS[EDIT.contrato].nome}</h3><p class="hint" style="margin-bottom:10px">Toque pra adicionar.</p>`+
     cat.map((it,i)=>`<div class="item-linha" onclick="addDoCatalogo(${i})" style="cursor:pointer"><div class="nm">${esc(it.n)}</div><div class="muted" style="font-size:12px;flex:0 0 auto">${it.v?brl(it.v):"definir R$"}/${it.un}</div><button class="btn sm" style="flex:0 0 auto">+ add</button></div>`).join("")+
@@ -894,19 +905,24 @@ function cancelarForm(){EDIT=null;tab("eventos");}
 /* ---- fotos com carimbo ---- */
 function tirarFoto(tipo){
   if(!isAdmin()&&EDIT&&EDIT.data&&EDIT.data>hoje()){alert("As fotos da entrega são registradas no dia. A entrega é dia "+EDIT.data+".");return;}
-  FOTO_ALVO=tipo;$("#fotoInput").click();}
+  FOTO_ALVO=tipo;FOTO_ORIGEM="camera";$("#fotoInput").click();}
+function fotoDaBiblioteca(tipo){
+  if(!isAdmin()&&EDIT&&EDIT.data&&EDIT.data>hoje()){alert("As fotos da entrega são registradas no dia. A entrega é dia "+EDIT.data+".");return;}
+  FOTO_ALVO=tipo;FOTO_ORIGEM="biblioteca";$("#fotoInputLib").click();}
 function receberFoto(input){const file=input.files&&input.files[0];if(!file)return;input.value="";
+  const daBib=(FOTO_ORIGEM==="biblioteca");
   const quando=new Date();let geo=null;
   const proc=()=>{const reader=new FileReader();reader.onload=e=>{const img=new Image();img.onload=()=>{
     const max=880;let w=img.width,h=img.height;if(w>h&&w>max){h=h*max/w;w=max;}else if(h>max){w=w*max/h;h=max;}
     const cv=document.createElement("canvas");cv.width=w;cv.height=h;const ctx=cv.getContext("2d");ctx.drawImage(img,0,0,w,h);
-    const linhas=[`${FOTO_ALVO} · ${quando.toLocaleString("pt-BR")}`,`${EDIT.cliente||"Restaurantes VR"}`];if(geo)linhas.push(`📍 ${geo.lat.toFixed(5)}, ${geo.lng.toFixed(5)}`);
+    const linhas=[`${FOTO_ALVO} · ${quando.toLocaleString("pt-BR")}${daBib?" · enviada da biblioteca":""}`,`${EDIT.cliente||"Restaurantes VR"}`];if(geo)linhas.push(`📍 ${geo.lat.toFixed(5)}, ${geo.lng.toFixed(5)}`);
     const fs=Math.max(13,Math.round(w/38));ctx.font=`bold ${fs}px Arial`;const bh=fs*(linhas.length+0.8);
     ctx.fillStyle="rgba(0,0,0,.55)";ctx.fillRect(0,h-bh,w,bh);ctx.fillStyle="#fff";ctx.textBaseline="top";
     linhas.forEach((l,i)=>ctx.fillText(l,10,h-bh+fs*0.4+i*fs*1.15));ctx.fillStyle="#1f6b4c";ctx.fillRect(0,h-bh,5,bh);
-    EDIT.fotos.push({tipo:FOTO_ALVO,ts:quando.toISOString(),geo,dataUrl:cv.toDataURL("image/jpeg",0.5)});renderFotos();
+    EDIT.fotos.push({tipo:FOTO_ALVO,ts:quando.toISOString(),geo,origem:daBib?"biblioteca":"camera",dataUrl:cv.toDataURL("image/jpeg",0.5)});renderFotos();
   };img.src=e.target.result;};reader.readAsDataURL(file);};
-  if(navigator.geolocation)navigator.geolocation.getCurrentPosition(p=>{geo={lat:p.coords.latitude,lng:p.coords.longitude};proc();},()=>proc(),{timeout:4000,maximumAge:60000});else proc();}
+  // foto da biblioteca não carimba GPS: a localização de agora não é onde a foto foi feita
+  if(!daBib&&navigator.geolocation)navigator.geolocation.getCurrentPosition(p=>{geo={lat:p.coords.latitude,lng:p.coords.longitude};proc();},()=>proc(),{timeout:4000,maximumAge:60000});else proc();}
 function renderFotos(){const g=$("#fotosGrid");if(!g)return;
   g.innerHTML=(EDIT.fotos||[]).map((f,i)=>`<div class="foto-item"><img src="${f.dataUrl}" onclick="verFoto('${f.dataUrl}')"><div class="del" onclick="EDIT.fotos.splice(${i},1);renderFotos()">✕</div><div class="lbl">${esc(f.tipo)}${f.geo?" 📍":""}</div></div>`).join("");}
 function verFoto(src){modal(`<img src="${src}" style="width:100%;border-radius:12px"><button class="btn sec" style="margin-top:10px" onclick="fecharModal()">Fechar</button>`);}
@@ -925,10 +941,15 @@ function formComprovacao(){const s=EDIT;
       <p class="hint">O "cheguei agora" pega a hora do seu celular automaticamente.</p></div>
     <label>Fotos da entrega (data, hora e local carimbados)</label>
     <input type="file" accept="image/*" capture="environment" id="fotoInput" style="display:none" onchange="receberFoto(this)">
-    <div class="row" style="margin-bottom:8px">
+    <input type="file" accept="image/*" id="fotoInputLib" style="display:none" onchange="receberFoto(this)">
+    <div class="row" style="margin-bottom:6px">
       <button class="btn sec sm" style="width:100%" onclick="tirarFoto('Chegada')">📷 Chegada</button>
       <button class="btn sec sm" style="width:100%" onclick="tirarFoto('Montagem')">📷 Montagem</button>
       <button class="btn sec sm" style="width:100%" onclick="tirarFoto('Entrega')">📷 Entrega</button></div>
+    <div class="row" style="margin-bottom:8px">
+      <button class="btn sec sm" style="width:100%" onclick="fotoDaBiblioteca('Chegada')">🖼️ Chegada</button>
+      <button class="btn sec sm" style="width:100%" onclick="fotoDaBiblioteca('Montagem')">🖼️ Montagem</button>
+      <button class="btn sec sm" style="width:100%" onclick="fotoDaBiblioteca('Entrega')">🖼️ Entrega</button></div>
     <div class="fotos-grid" id="fotosGrid"></div>
     <label style="margin-top:12px">Checklist de qualidade</label>
     <div id="checkBox" style="margin-bottom:12px">${CHECKLIST.map((t,i)=>`<div class="check ${s.comprovacao.checklist['c'+i]?'done':''}" onclick="toggleCheck(${i})"><input type="checkbox" ${s.comprovacao.checklist['c'+i]?'checked':''} onclick="event.stopPropagation();toggleCheck(${i})"><span>${t}</span></div>`).join("")}</div>
