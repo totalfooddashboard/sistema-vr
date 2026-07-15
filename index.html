@@ -350,8 +350,10 @@ const PERM_MAP={contas:"permContas",recibos:"permRecibos",cmv:"permCmv",precos:"
 function podeVer(tab){if(isAdmin())return true;if(!USER)return false;if(tab==="estoque"||tab==="eventos"||tab==="compras"||tab==="painelf")return true;
   return !!USER[PERM_MAP[tab]];}
 const podeGerEstoque=()=>isAdmin()||(USER&&USER.permEstoque===true);
-// Cardápio do evento avulso: dono e gerente (quem tem CMV ou Preços) montam o pedido.
-const podeMontarCardapio=()=>isAdmin()||(USER&&(USER.permCmv===true||USER.permPrecos===true));
+// Cardápio do evento avulso: TODO mundo que loga monta o pedido — igual à grade do
+// Arcelormittal/ARCO, que já é aberta pra equipe. Não depende de permissão marcada.
+// O que é financeiro de verdade (custo, gastos, margem, painel) continua só do dono.
+const podeMontarCardapio=()=>!!USER;
 const podeContas=()=>podeVer("contas");
 
 const CONF_PADRAO={apiKey:"", modelo:"claude-sonnet-5", empresa:"Restaurantes VR"};
