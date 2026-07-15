@@ -1,6 +1,14 @@
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>VR Refeições — Controle de Serviços</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1f6b4c">
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="VR Refeições">
+<meta name="mobile-web-app-capable" content="yes">
 <style>
 :root{
   --lar:#1f6b4c; --lar-esc:#123f2d; --lar-claro:#dcece4;
@@ -188,6 +196,10 @@ nav button.on{color:var(--lar);border-bottom-color:var(--lar)}
     <p id="loginErro" style="color:var(--vermelho);font-weight:700;font-size:13px;margin-top:10px;min-height:16px"></p>
     <button onclick="esqueciSenha()" style="background:none;color:var(--lar);font-weight:700;font-size:13px;text-decoration:underline">Esqueci minha senha</button>
     <p class="hint" style="margin-top:12px">Entre com seu email. O acesso é definido pelo gestor.</p>
+    <div id="instalarBox" class="hide" style="margin-top:16px;border-top:1px solid var(--linha);padding-top:14px">
+      <button class="btn" id="btnInstalar" onclick="instalarApp()" style="background:var(--lar-esc)">📲 Instalar o app no celular</button>
+      <p class="hint" style="margin-top:6px">Fica com ícone na tela inicial e abre em tela cheia.</p>
+    </div>
   </div>
 </div>
 
@@ -1729,5 +1741,50 @@ if(FB_OK){
   });
 }else{
   $("#loginErro").textContent="Sem conexão com a nuvem. Confira a internet e recarregue.";
+}
+
+/* ===================== APP INSTALÁVEL (PWA) ===================== */
+let PROMPT_INSTALL=null;
+const jaInstalado=()=>window.matchMedia('(display-mode: standalone)').matches||window.navigator.standalone===true;
+const ehIOS=()=>/iphone|ipad|ipod/i.test(navigator.userAgent)&&!window.MSStream;
+
+if("serviceWorker" in navigator){
+  window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(e=>console.warn("sw:",e)));
+}
+// Android/Chrome: o navegador avisa quando dá pra instalar
+window.addEventListener("beforeinstallprompt",e=>{
+  e.preventDefault();PROMPT_INSTALL=e;
+  const b=$("#instalarBox");if(b&&!jaInstalado())b.classList.remove("hide");
+});
+window.addEventListener("appinstalled",()=>{
+  PROMPT_INSTALL=null;const b=$("#instalarBox");if(b)b.classList.add("hide");
+});
+// iPhone não tem instalação automática: só dá pra ensinar o caminho
+document.addEventListener("DOMContentLoaded",()=>{
+  if(jaInstalado())return;
+  if(ehIOS()){
+    const b=$("#instalarBox");const t=$("#btnInstalar");
+    if(b&&t){t.textContent="📲 Como instalar no iPhone";b.classList.remove("hide");}
+  }
+  // veio do "Instalar o app" do site (acesso.html) → já abre a instalação
+  if(location.search.indexOf("instalar")>=0){
+    const b=$("#instalarBox");if(b)b.classList.remove("hide");
+    setTimeout(()=>{if(PROMPT_INSTALL||ehIOS())instalarApp();},900);
+  }
+});
+function instalarApp(){
+  if(ehIOS()){
+    alert("Pra instalar no iPhone:\n\n1) Toque no botão Compartilhar (o quadradinho com a seta pra cima, embaixo no Safari)\n2) Role e toque em \"Adicionar à Tela de Início\"\n3) Toque em \"Adicionar\"\n\nPronto — o ícone da VR fica na tela do celular.");
+    return;
+  }
+  if(!PROMPT_INSTALL){
+    alert("Seu navegador não ofereceu a instalação agora.\n\nNo Android/Chrome: toque nos 3 pontinhos (⋮) no canto e escolha \"Instalar app\" ou \"Adicionar à tela inicial\".\n\nObs.: no modo anônimo a instalação não funciona.");
+    return;
+  }
+  PROMPT_INSTALL.prompt();
+  PROMPT_INSTALL.userChoice.then(r=>{
+    if(r&&r.outcome==="accepted"){const b=$("#instalarBox");if(b)b.classList.add("hide");}
+    PROMPT_INSTALL=null;
+  }).catch(()=>{});
 }
 </script>
