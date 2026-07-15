@@ -615,7 +615,7 @@ function cardServ(s){
 /* ===================== FORM EVENTO ===================== */
 function novoServico(){
   EDIT={id:uid(),criadoEm:Date.now(),criadoPor:USER.nome,criadoPorUid:(USER.uid||""),contrato:"arcelormittal",cliente:"",evento:"",local:"",data:hoje(),horaEvento:"",pessoas:"",
-    itens:[],descricaoPedido:"",solicitacaoPedido:null,lancado:false,lancadoEm:"",lancadoPor:"",solicAlteracao:null,
+    itens:[],descricaoPedido:"",detalhes:"",materiais:[],contratoNome:"",solicitacaoPedido:null,lancado:false,lancadoEm:"",lancadoPor:"",solicAlteracao:null,
     logistica:{veiculo:"",motorista:USER.nome,kmInicial:"",kmFinal:"",combustivelLitros:"",combustivelValor:"",pedagio:""},
     gastos:[],comprovacao:{horaPrevista:"",horaChegada:"",obs:"",checklist:{}},fotos:[],status:"plan"};
   renderForm();
@@ -647,6 +647,9 @@ function renderForm(){
     ${secSolicitacao(s)}`
    : (admin?`
     <div class="sec-tit">🧾 Itens do pedido (faturamento)</div>
+    <input type="file" accept="image/*,application/pdf" id="ctrInput" style="display:none" onchange="receberContrato(this)">
+    <button class="btn ia" id="btnIAContrato" onclick="$('#ctrInput').click()">🤖 Ler contrato com IA (foto ou PDF)</button>
+    <p class="hint" style="margin:6px 0 10px">A IA lê o contrato/proposta e preenche <b>os itens que serão servidos</b>, os <b>materiais</b> e os <b>detalhes</b> do evento.${s.contratoNome?` <span style="color:var(--verde);font-weight:700">📄 lido: ${esc(s.contratoNome)}</span>`:''}</p>
     <button class="catalogo-btn" onclick="abrirCatalogo()">+ Adicionar item do catálogo ${c.nome}</button>
     <div id="itensBox"></div>
     <button class="btn sec sm" style="width:100%;margin-top:4px" onclick="addItemLivre()">+ Item avulso (digitar)</button>
@@ -672,6 +675,7 @@ function renderForm(){
     <div class="field" style="flex:0 0 110px"><label>Nº pessoas</label><input type="number" id="fPessoas" value="${esc(s.pessoas)}" inputmode="numeric"></div>
   </div>
   ${secBilling}
+  ${s.contrato==='evento'?secDetalhes(s):''}
   <div class="sec-tit">🚗 Logística & deslocamento</div>
   <div class="row">
     <div class="field"><label>Veículo / placa</label><input id="lVeiculo" value="${esc(s.logistica.veiculo)}" placeholder="Ex: Fiorino ABC-1234"></div>
@@ -714,8 +718,24 @@ function renderForm(){
     <button class="btn sec" style="margin-top:8px" onclick="salvarServico()">💾 Salvar rascunho</button>`
    :`<button class="btn gh" onclick="salvarServico()">✔️ Salvar evento</button>`}
   <button class="btn sec" style="margin-top:8px" onclick="cancelarForm()">Cancelar</button>`;
-  renderItens();if(usaGrid)renderGridPedido();renderGastos();renderFotos();renderSolic();calcLive();
+  renderItens();if(usaGrid)renderGridPedido();renderGastos();renderFotos();renderSolic();renderMateriais();calcLive();
 }
+/* ---- detalhes & materiais (evento avulso) ---- */
+function secDetalhes(s){return `
+  <div class="sec-tit">📋 Detalhes do evento</div>
+  <div class="field"><label>Detalhes / requisitos <span class="muted" style="text-transform:none">(montagem, uniforme, restrições, responsável, pagamento...)</span></label>
+    <textarea id="fDetalhes" rows="3" placeholder="Ex: montagem às 14h, toalha branca, 2 garçons de terno, 3 pratos veganos...">${esc(s.detalhes||'')}</textarea></div>
+  <div class="sec-tit">🪑 Materiais e itens extras</div>
+  <p class="hint" style="margin-top:-4px;margin-bottom:8px">Mesas, toalhas, louça, réchaud, tenda, decoração, som... — o que a equipe precisa levar.</p>
+  <div id="materiaisBox"></div>
+  <button class="btn sec sm" style="width:100%;margin-top:4px" onclick="addMaterial()">+ Adicionar material</button>`;}
+function renderMateriais(){const box=$("#materiaisBox");if(!box)return;
+  box.innerHTML=(EDIT.materiais||[]).map((m,i)=>`<div class="item-linha">
+    <input class="nm" style="flex:2" value="${esc(m.nome)}" placeholder="material" oninput="EDIT.materiais[${i}].nome=this.value">
+    <input class="qtd" type="number" inputmode="decimal" value="${esc(m.qtd)}" placeholder="qtd" oninput="EDIT.materiais[${i}].qtd=this.value">
+    <input class="nm" style="flex:2" value="${esc(m.obs||'')}" placeholder="obs (cor, tamanho...)" oninput="EDIT.materiais[${i}].obs=this.value">
+    <button class="x" onclick="EDIT.materiais.splice(${i},1);renderMateriais()">✕</button></div>`).join("")||`<p class="muted" style="font-size:13px;text-align:center;padding:6px">Nenhum material.</p>`;}
+function addMaterial(){coletarForm();EDIT.materiais=EDIT.materiais||[];EDIT.materiais.push({nome:"",qtd:1,obs:""});renderMateriais();}
 /* ---- grade do pedido (Arcelor: preço fixo · ARCO: preço editável) ---- */
 function catNames(contrato){return new Set((CONTRATOS[contrato].cat||[]).map(x=>norm(x.n)));}
 function renderGridPedido(){const box=$("#gridPedido");if(!box)return;const cat=CONTRATOS[EDIT.contrato].cat;const precoEd=(EDIT.contrato==='arco');
@@ -812,6 +832,7 @@ function coletarForm(){if(!$("#fCliente"))return;
   EDIT.logistica.combustivelLitros=$("#lLit").value;EDIT.logistica.combustivelValor=$("#lComb").value;EDIT.logistica.pedagio=$("#lPed").value;
   EDIT.comprovacao.horaPrevista=$("#cPrev").value;EDIT.comprovacao.horaChegada=$("#cChegada").value;EDIT.comprovacao.obs=$("#cObs").value;
   if($("#fDescPedido"))EDIT.descricaoPedido=$("#fDescPedido").value;
+  if($("#fDetalhes"))EDIT.detalhes=$("#fDetalhes").value;
 }
 function salvarServico(){coletarForm();
   if(!EDIT.cliente){alert("Coloque pelo menos o cliente/evento.");return;}
@@ -894,6 +915,10 @@ function abrirDetalhe(id){const s=SERVICOS.find(x=>x.id===id);if(!s)return;const
     ${custoComprasAloc(s.id)?`<div style="display:flex;justify-content:space-between;font-size:13.5px;padding:4px 0;border-bottom:1px dashed var(--linha)"><span>🛒 Compras desmembradas</span><b>${brl(custoComprasAloc(s.id))}</b></div>`:''}`:"";
   const cdev=comprasDoEvento(s.id);
   const compBloco=(!admin && podeVer('cmv') && cdev.length)?`<div class="sec-tit">🛒 Compras usadas neste evento</div>${cdev.map(o=>`<div style="display:flex;justify-content:space-between;font-size:13.5px;padding:4px 0;border-bottom:1px dashed var(--linha);cursor:pointer" onclick="abrirCompra('${o.compra.id}')"><span>${esc(o.compra.fornecedor||'compra')} · ${esc(o.compra.data||'')}<div class="muted" style="font-size:11px">${esc(o.its.join(', '))}</div></span><b>${brl(o.valor)}</b></div>`).join('')}<div style="display:flex;justify-content:space-between;padding:6px 0;font-weight:800"><span>Custo de compras (entra no CMV)</span><b>${brl(custoComprasAloc(s.id))}</b></div>`:'';
+  const mats=(s.materiais||[]).filter(m=>m&&m.nome);
+  const detBloco=(s.detalhes||mats.length)?`
+    ${s.detalhes?`<div class="sec-tit">📋 Detalhes do evento</div><p style="font-size:13.5px;white-space:pre-wrap;margin:0">${esc(s.detalhes)}</p>`:''}
+    ${mats.length?`<div class="sec-tit">🪑 Materiais e itens extras</div>${mats.map(m=>`<div style="display:flex;justify-content:space-between;font-size:13.5px;padding:4px 0;border-bottom:1px dashed var(--linha)"><span>${esc(m.nome)}${m.obs?` <span class="muted">— ${esc(m.obs)}</span>`:''}</span><b>${esc(m.qtd||1)}</b></div>`).join('')}`:''}`:'';
   const podeEd=podeEditarEvento(s);
   const alt=s.solicAlteracao;
   const bannerAlt = (admin&&alt&&alt.status==='pendente')?`<div class="warn"><b>✋ ${esc(alt.por||'Funcionário')}</b> pediu autorização pra alterar:<br>"${esc(alt.motivo||'')}"<br><button class="btn sm gh" style="margin-top:8px" onclick="liberarAlteracao('${s.id}')">✅ Liberar alteração</button></div>`
@@ -908,6 +933,7 @@ function abrirDetalhe(id){const s=SERVICOS.find(x=>x.id===id);if(!s)return;const
     ${bannerAlt}
     ${pedidoBloco}
     ${finBloco}
+    ${detBloco}
     ${compBloco}
     <div class="sec-tit">🚗 Logística</div>
     <div style="font-size:13.5px">${s.logistica.veiculo?`<div>Veículo: <b>${esc(s.logistica.veiculo)}</b></div>`:""}${s.logistica.motorista?`<div>Motorista: <b>${esc(s.logistica.motorista)}</b></div>`:""}
@@ -1087,6 +1113,72 @@ Regras: valores numéricos com ponto decimal; não invente itens; se não achar 
   t=t.replace(/```json/gi,"").replace(/```/g,"").trim();
   const a=t.indexOf("{"),z=t.lastIndexOf("}");if(a>=0&&z>a)t=t.slice(a,z+1);
   return JSON.parse(t);
+}
+/* ---- IA: ler CONTRATO / proposta de evento (foto ou PDF) ---- */
+async function iaLerContrato(dataUrl){
+  if(!CONFIG.apiKey)await carregarConfigNuvem();
+  if(!CONFIG.apiKey)throw new Error("A leitura por IA ainda não foi ativada. O dono precisa colar a chave da Anthropic em ⚙️ Configurações.");
+  const [meta,b64]=(dataUrl||"").split(",");const media=(meta.match(/data:(.*?);/)||[])[1]||"image/jpeg";
+  const ehPdf=/pdf/i.test(media);
+  const prompt=`Você trabalha numa empresa de buffet e eventos (Restaurantes VR). Leia este CONTRATO / PROPOSTA de evento e extraia as informações.
+Responda APENAS com um JSON válido, sem texto antes ou depois, no formato:
+{"cliente":"","evento":"","data":"AAAA-MM-DD","hora":"HH:MM","local":"","pessoas":0,
+ "itens":[{"nome":"","qtd":0,"valor":0}],
+ "materiais":[{"nome":"","qtd":0,"obs":""}],
+ "detalhes":""}
+Regras:
+- "itens" = TUDO que será SERVIDO/consumido no evento: comidas, bebidas, coffee break, buffet, entrada, prato principal, sobremesa, coquetel, churrasco, feijoada, e mão de obra cobrada (garçom, apoio). Liste item por item, sem agrupar. "qtd" = quantidade (se for por pessoa, use o nº de pessoas); "valor" = preço unitário em R$ (0 se não constar).
+- "materiais" = mesas, cadeiras, toalhas, louça, talheres, taças, réchaud, tenda, decoração, equipamento, estrutura, som, iluminação, gelo, e tudo de montagem/locação. "obs" = detalhe (cor, tamanho, modelo).
+- "detalhes" = resumo em texto dos requisitos: horário de montagem/desmontagem, uniforme, restrições alimentares, responsável/contato, condições de pagamento e observações importantes.
+- Não invente nada. O que não constar, deixe vazio ou 0. Valores numéricos com ponto decimal.`;
+  const bloco=ehPdf?{type:"document",source:{type:"base64",media_type:"application/pdf",data:b64}}
+                   :{type:"image",source:{type:"base64",media_type:media,data:b64}};
+  const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",
+    headers:{"content-type":"application/json","x-api-key":CONFIG.apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+    body:JSON.stringify({model:CONFIG.modelo||"claude-sonnet-5",max_tokens:4000,messages:[{role:"user",content:[bloco,{type:"text",text:prompt}]}]})});
+  if(!res.ok){const er=await res.text();throw new Error("API "+res.status+": "+er.slice(0,180));}
+  const data=await res.json();
+  let t=((data.content||[]).filter(c=>c.type==="text").map(c=>c.text||"").join("")||"").trim();
+  t=t.replace(/```json/gi,"").replace(/```/g,"").trim();
+  const a=t.indexOf("{"),z=t.lastIndexOf("}");if(a>=0&&z>a)t=t.slice(a,z+1);
+  return JSON.parse(t);
+}
+function receberContrato(input){const file=input.files&&input.files[0];if(!file)return;input.value="";
+  const ehPdf=/pdf/i.test(file.type||"")||/\.pdf$/i.test(file.name||"");
+  const reader=new FileReader();
+  reader.onload=e=>{
+    if(ehPdf){lerContratoIA(e.target.result,file.name);return;}
+    const img=new Image();
+    img.onload=()=>{const max=1600;let w=img.width,h=img.height;
+      if(w>h&&w>max){h=h*max/w;w=max;}else if(h>max){w=w*max/h;h=max;}
+      const cv=document.createElement("canvas");cv.width=w;cv.height=h;cv.getContext("2d").drawImage(img,0,0,w,h);
+      lerContratoIA(cv.toDataURL("image/jpeg",0.72),file.name);};
+    img.onerror=()=>alert("Não consegui abrir esse arquivo. Use uma foto (JPG/PNG) ou um PDF.");
+    img.src=e.target.result;};
+  reader.readAsDataURL(file);}
+async function lerContratoIA(dataUrl,nome){
+  const btn=$("#btnIAContrato");
+  if(btn){btn.innerHTML=`<span class="spin"></span> Lendo contrato...`;btn.disabled=true;}
+  try{
+    coletarForm();
+    const obj=await iaLerContrato(dataUrl);
+    if(obj.cliente&&!EDIT.cliente)EDIT.cliente=obj.cliente;
+    if(obj.evento&&!EDIT.evento)EDIT.evento=obj.evento;
+    if(obj.data&&/^\d{4}-\d{2}-\d{2}$/.test(obj.data))EDIT.data=obj.data;
+    if(obj.hora&&/^\d{1,2}:\d{2}$/.test(obj.hora))EDIT.horaEvento=obj.hora;
+    if(obj.local&&!EDIT.local)EDIT.local=obj.local;
+    if((+obj.pessoas)>0&&!EDIT.pessoas)EDIT.pessoas=+obj.pessoas;
+    (obj.itens||[]).forEach(it=>{if(it&&it.nome)EDIT.itens.push({nome:it.nome,qtd:+it.qtd||1,valor:+it.valor||0});});
+    EDIT.materiais=EDIT.materiais||[];
+    (obj.materiais||[]).forEach(m=>{if(m&&m.nome)EDIT.materiais.push({nome:m.nome,qtd:+m.qtd||1,obs:m.obs||""});});
+    if(obj.detalhes)EDIT.detalhes=(EDIT.detalhes?EDIT.detalhes+"\n\n":"")+obj.detalhes;
+    EDIT.contratoNome=nome||"contrato";
+    renderForm();
+    const b=$("#btnIAContrato");
+    if(b){b.innerHTML=`✅ ${(obj.itens||[]).length} itens · ${(obj.materiais||[]).length} materiais`;b.disabled=true;
+      setTimeout(()=>{const b2=$("#btnIAContrato");if(b2){b2.innerHTML="🤖 Ler contrato com IA (foto ou PDF)";b2.disabled=false;}},3000);}
+  }catch(e){alert("Não consegui ler o contrato com a IA.\n\n"+e.message+"\n\nPode preencher na mão.");
+    const b=$("#btnIAContrato");if(b){b.innerHTML="🤖 Ler contrato com IA (foto ou PDF)";b.disabled=false;}}
 }
 async function lerComprovanteIA(){
   if(!EDITC.comprovanteFoto){alert("Bata a foto do comprovante primeiro.");return;}
