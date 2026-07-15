@@ -339,6 +339,8 @@ const PERM_MAP={contas:"permContas",recibos:"permRecibos",cmv:"permCmv",precos:"
 function podeVer(tab){if(isAdmin())return true;if(!USER)return false;if(tab==="estoque"||tab==="eventos"||tab==="compras"||tab==="painelf")return true;
   return !!USER[PERM_MAP[tab]];}
 const podeGerEstoque=()=>isAdmin()||(USER&&USER.permEstoque===true);
+// Cardápio do evento avulso: dono e gerente (quem tem CMV ou Preços) montam o pedido.
+const podeMontarCardapio=()=>isAdmin()||(USER&&(USER.permCmv===true||USER.permPrecos===true));
 const podeContas=()=>podeVer("contas");
 
 const CONF_PADRAO={apiKey:"", modelo:"claude-sonnet-5", empresa:"Restaurantes VR"};
@@ -693,8 +695,8 @@ function renderForm(){
     ${isArco?`<div class="field" style="margin-top:10px"><label>O que vai no pedido (cardápio / itens)</label><textarea id="fDescPedido" rows="3" placeholder="Descreva o que compõe o pedido...">${esc(s.descricaoPedido||'')}</textarea></div>`:''}
     <div style="text-align:right;margin-top:8px;font-weight:800">Total do pedido: <span id="fatLive" style="color:var(--lar)">R$ 0,00</span></div>
     ${secSolicitacao(s)}`
-   : (admin?`
-    <div class="sec-tit">🍽️ Cardápio / itens do evento (faturamento)</div>
+   : (podeMontarCardapio()?`
+    <div class="sec-tit">🍽️ Cardápio / itens do evento</div>
     <input type="file" accept="image/*,application/pdf" id="ctrInput" style="display:none" onchange="receberContrato(this)">
     <button class="btn ia" id="btnIAContrato" onclick="$('#ctrInput').click()">🤖 Ler contrato com IA (foto ou PDF)</button>
     <p class="hint" style="margin:6px 0 10px">A IA lê o contrato/proposta e preenche <b>os itens que serão servidos</b>, os <b>materiais</b> e os <b>detalhes</b> do evento.${s.contratoNome?` <span style="color:var(--verde);font-weight:700">📄 lido: ${esc(s.contratoNome)}</span>`:''}</p>
@@ -704,7 +706,7 @@ function renderForm(){
       <button class="btn sec sm" style="flex:1" onclick="addItemLivre()">+ Adicionar item do cardápio</button>
       <button class="btn sec sm" style="flex:1" onclick="abrirCatalogo()">📖 Pegar do catálogo</button>
     </div>
-    <div style="text-align:right;margin-top:8px;font-weight:800">Faturamento: <span id="fatLive" style="color:var(--lar)">R$ 0,00</span></div>`:'');
+    <div style="text-align:right;margin-top:8px;font-weight:800">${admin?'Faturamento':'Total do evento'}: <span id="fatLive" style="color:var(--lar)">R$ 0,00</span></div>`:'');
   const secGastos=admin?`
     <div class="sec-tit">💸 Gastos diretos (custo)</div>
     <p class="hint" style="margin-top:-4px;margin-bottom:10px">Gastos que não vieram de uma compra lançada (diária de freela, etc.). As compras entram sozinhas quando você desmembra.</p>
