@@ -69,6 +69,7 @@ nav button.on{color:var(--lar);border-bottom-color:var(--lar)}
 .tag.arc{background:#e0e7ff;color:#3730a3}
 .tag.aco{background:#cffafe;color:#0e7490}
 .tag.eve{background:var(--lar-claro);color:var(--lar-esc)}
+.tag.afr{background:#fce7f3;color:#9d174d}
 
 .serv{background:#fff;border:1px solid var(--linha);border-radius:14px;padding:14px;margin-bottom:11px;box-shadow:0 1px 3px rgba(15,23,42,.04)}
 .serv:active{background:#fafafa}
@@ -236,9 +237,7 @@ nav button.on{color:var(--lar);border-bottom-color:var(--lar)}
     <div class="field"><input id="busca" placeholder="🔍 Buscar cliente, evento, local..." oninput="render()"></div>
     <div class="pill-select" style="margin-bottom:14px">
       <button data-f="todos" class="on" onclick="filtroContrato(this,'todos')">Todos</button>
-      <button data-f="arcelormittal" onclick="filtroContrato(this,'arcelormittal')">Arcelor</button>
-      <button data-f="arco" onclick="filtroContrato(this,'arco')">ARCO</button>
-      <button data-f="evento" onclick="filtroContrato(this,'evento')">Eventos</button>
+      <span id="filtrosContrato"></span>
     </div>
     <div id="listaEventos"></div>
   </div>
@@ -361,11 +360,18 @@ const CATALOGO_EVENTO=[
   {n:"Coquetel",v:0,un:"pessoa"},{n:"Churrasco",v:0,un:"pessoa"},{n:"Feijoada",v:0,un:"pessoa"},
   {n:"Garçom / apoio",v:0,un:"un"},{n:"Locação de equipamento",v:0,un:"un"},
 ];
+const CATALOGO_AFONSO=[{cod:10,n:"Coffee Break",v:50.00,un:"pessoa"}];
+/* Pra criar um cliente novo: adicione UMA linha aqui.
+   grid=grade de pedido com quantidades · precoEditavel=preço aberto no pedido
+   prazoHora=hora limite do dia anterior (null = sem prazo) · descricao=campo "o que vai no pedido" */
 const CONTRATOS={
-  arcelormittal:{nome:"Arcelormittal",tag:"arc",cat:CATALOGO_ARCELOR},
-  arco:{nome:"ARCO Educação",tag:"aco",cat:CATALOGO_ARCO},
-  evento:{nome:"Evento avulso",tag:"eve",cat:CATALOGO_EVENTO},
+  arcelormittal:{nome:"Arcelormittal",curto:"Arcelor",tag:"arc",cat:CATALOGO_ARCELOR,grid:true,precoEditavel:false,prazoHora:null,descricao:false,placeholder:"Arcelormittal"},
+  arco:{nome:"ARCO Educação",curto:"ARCO",tag:"aco",cat:CATALOGO_ARCO,grid:true,precoEditavel:true,prazoHora:22,descricao:true,placeholder:"ARCO / CD Fortaleza"},
+  afonso:{nome:"Afonso França",curto:"Afonso",tag:"afr",cat:CATALOGO_AFONSO,grid:true,precoEditavel:false,prazoHora:null,descricao:false,placeholder:"Afonso França"},
+  evento:{nome:"Evento avulso",curto:"Eventos",tag:"eve",cat:CATALOGO_EVENTO,grid:false,precoEditavel:true,prazoHora:null,descricao:false,placeholder:"Nome do cliente"},
 };
+const conf=k=>CONTRATOS[k]||CONTRATOS.evento;
+const usaGridC=k=>!!(CONTRATOS[k]&&CONTRATOS[k].grid);
 const CATEGORIAS_GASTO=["Insumos / mercado","Mão de obra fixa","Freelancer","Descartáveis","Gás / energia","Transporte extra","Outros"];
 const CHECKLIST=["Cheguei no horário combinado","Montagem/mesa conforme pedido","Comida na temperatura certa","Quantidade conferida com o cliente","Local limpo na saída"];
 const UNIDADES=["un","kg","g","L","ml","cx","pct","dz","fardo"];
@@ -473,6 +479,7 @@ function iniciar(){
   montarNav();
   iniciarEscutas();
   carregarConfigNuvem(); // puxa a chave da IA compartilhada pela nuvem
+  montarFiltrosContrato();
   montarFiltroMes();
   render();
   tab(isAdmin()?"painel":"eventos");
@@ -511,6 +518,8 @@ function tab(t){
   window.scrollTo(0,0);
 }
 function filtroContrato(btn,f){document.querySelectorAll('[data-f]').forEach(b=>b.classList.remove("on"));btn.classList.add("on");FILTRO_CONTRATO=f;render();}
+function montarFiltrosContrato(){const b=$("#filtrosContrato");if(!b)return;
+  b.innerHTML=Object.keys(CONTRATOS).map(k=>`<button data-f="${k}" onclick="filtroContrato(this,'${k}')">${esc(CONTRATOS[k].curto||CONTRATOS[k].nome)}</button>`).join("");}
 
 function montarFiltroMes(){
   const meses=[...new Set(SERVICOS.map(mesDe).filter(Boolean))].sort().reverse();
@@ -595,7 +604,7 @@ function cardServ(s){
   const c=CONTRATOS[s.contrato]||{};const st=s.status||"plan";
   const stTxt={plan:"Planejado",and:"Em andamento",entregue:"Entregue"}[st]||"Planejado";
   const stCls={plan:"plan",and:"and",entregue:"ok"}[st]||"plan";
-  const usaGrid=(s.contrato==='arcelormittal'||s.contrato==='arco');
+  const usaGrid=usaGridC(s.contrato);
   const alt=s.solicAlteracao;
   const badge = (alt&&alt.status==='pendente')?`<span class="tag" style="background:var(--amar-claro);color:#b45309">✋ pediu alteração</span> `
     : usaGrid ? (s.lancado?`<span class="tag" style="background:var(--verde-claro);color:#15803d">✅ lançado</span> `:`<span class="tag" style="background:#f1f5f9;color:var(--cinza)">📝 rascunho</span> `):'';
@@ -685,14 +694,14 @@ function duplicarClienteDia(id){const b=SERVICOS.find(s=>s.id===id);EDIT=JSON.pa
 
 function renderForm(){
   const s=EDIT;const c=CONTRATOS[s.contrato];const admin=isAdmin();
-  const isArc=s.contrato==='arcelormittal', isArco=s.contrato==='arco', usaGrid=isArc||isArco;
+  const usaGrid=usaGridC(s.contrato), cc=conf(s.contrato);
   const secBilling = usaGrid ? `
     <div class="sec-tit">🧾 Detalhamento do pedido</div>
-    ${isArco?prazoArcoHTML(s):`<p class="hint" style="margin-top:-4px;margin-bottom:8px">Coloque a <b>quantidade</b> de cada item — só o que tiver quantidade entra no pedido.</p>`}
+    ${cc.prazoHora?prazoPedidoHTML(s):`<p class="hint" style="margin-top:-4px;margin-bottom:8px">Coloque a <b>quantidade</b> de cada item — só o que tiver quantidade entra no pedido.</p>`}
     <div id="gridPedido"></div>
     <button class="btn sec sm" style="width:100%;margin-top:6px" onclick="addItemLivre()">+ Item fora da tabela</button>
     <div id="itensBox"></div>
-    ${isArco?`<div class="field" style="margin-top:10px"><label>O que vai no pedido (cardápio / itens)</label><textarea id="fDescPedido" rows="3" placeholder="Descreva o que compõe o pedido...">${esc(s.descricaoPedido||'')}</textarea></div>`:''}
+    ${cc.descricao?`<div class="field" style="margin-top:10px"><label>O que vai no pedido (cardápio / itens)</label><textarea id="fDescPedido" rows="3" placeholder="Descreva o que compõe o pedido...">${esc(s.descricaoPedido||'')}</textarea></div>`:''}
     <div style="text-align:right;margin-top:8px;font-weight:800">Total do pedido: <span id="fatLive" style="color:var(--lar)">R$ 0,00</span></div>
     ${secSolicitacao(s)}`
    : (podeMontarCardapio()?`
@@ -717,7 +726,7 @@ function renderForm(){
   <h2 style="margin-bottom:14px">${SERVICOS.find(x=>x.id===s.id)?"✏️ Editar evento":"➕ Novo evento"}</h2>
   <div class="field"><label>Contrato / frente</label>
     <div class="pill-select" id="selContrato">${Object.keys(CONTRATOS).map(k=>`<button data-k="${k}" class="${s.contrato===k?'on':''}" onclick="mudarContrato('${k}')">${CONTRATOS[k].nome}</button>`).join("")}</div></div>
-  <div class="field"><label>${s.contrato==='evento'?'Cliente / evento':'Cliente'}</label><input id="fCliente" value="${esc(s.cliente)}" placeholder="${s.contrato==='arcelormittal'?'Arcelormittal':s.contrato==='arco'?'ARCO / CD Fortaleza':'Nome do cliente'}"></div>
+  <div class="field"><label>${s.contrato==='evento'?'Cliente / evento':'Cliente'}</label><input id="fCliente" value="${esc(s.cliente)}" placeholder="${esc(conf(s.contrato).placeholder||'Nome do cliente')}"></div>
   <div class="field"><label>Nome/descrição do evento <span class="muted" style="text-transform:none">(dá pra ter vários no mesmo dia)</span></label><input id="fEvento" value="${esc(s.evento)}" placeholder="Ex: Coffee RH manhã / Almoço obra"></div>
   <div class="row">
     <div class="field"><label>Data</label><input type="date" id="fData" value="${esc(s.data)}"></div>
@@ -797,7 +806,7 @@ function renderMateriais(){const box=$("#materiaisBox");if(!box)return;
 function addMaterial(){coletarForm();EDIT.materiais=EDIT.materiais||[];EDIT.materiais.push({nome:"",qtd:1,obs:""});renderMateriais();}
 /* ---- grade do pedido (Arcelor: preço fixo · ARCO: preço editável) ---- */
 function catNames(contrato){return new Set((CONTRATOS[contrato].cat||[]).map(x=>norm(x.n)));}
-function renderGridPedido(){const box=$("#gridPedido");if(!box)return;const cat=CONTRATOS[EDIT.contrato].cat;const precoEd=(EDIT.contrato==='arco');
+function renderGridPedido(){const box=$("#gridPedido");if(!box)return;const cat=CONTRATOS[EDIT.contrato].cat;const precoEd=!!conf(EDIT.contrato).precoEditavel;
   box.innerHTML=`<div class="item-linha" style="background:#0f172a;color:#fff;padding:6px 8px"><div style="flex:0 0 30px;font-size:10px;font-weight:800">ITEM</div><div class="nm" style="font-size:10px;font-weight:800">DESCRIÇÃO</div><div style="flex:0 0 52px;font-size:10px;font-weight:800;text-align:center">QTD</div><div style="flex:0 0 66px;font-size:10px;font-weight:800;text-align:right">PREÇO</div><div style="flex:0 0 70px;font-size:10px;font-weight:800;text-align:right">VALOR</div></div>`+
     cat.map((it,i)=>{const cur=EDIT.itens.find(x=>norm(x.nome)===norm(it.n));const q=cur?cur.qtd:"";const pv=cur&&cur.valor!=null&&cur.valor!==""?cur.valor:it.v;
       return `<div class="item-linha">
@@ -807,15 +816,16 @@ function renderGridPedido(){const box=$("#gridPedido");if(!box)return;const cat=
         ${precoEd?`<input style="flex:0 0 66px;padding:8px" type="number" inputmode="decimal" value="${esc(pv||'')}" placeholder="R$" oninput="setPrecoPedido(${i},this.value)">`:`<div style="flex:0 0 66px;text-align:right;font-size:12px;align-self:center">${brl(it.v)}</div>`}
         <div class="tt" style="flex:0 0 70px" id="gp${i}">${brl((+q||0)*(+pv||0))}</div></div>`;}).join("");}
 function setQtdPedido(i,val){const it=CONTRATOS[EDIT.contrato].cat[i];const q=+val||0;const idx=EDIT.itens.findIndex(x=>norm(x.nome)===norm(it.n));
-  if(q>0){if(idx>=0){EDIT.itens[idx].qtd=q;if(EDIT.contrato!=='arco')EDIT.itens[idx].valor=it.v;}else EDIT.itens.push({nome:it.n,cod:it.cod,qtd:q,valor:it.v});}
+  if(q>0){if(idx>=0){EDIT.itens[idx].qtd=q;if(!conf(EDIT.contrato).precoEditavel)EDIT.itens[idx].valor=it.v;}else EDIT.itens.push({nome:it.n,cod:it.cod,qtd:q,valor:it.v});}
   else if(idx>=0)EDIT.itens.splice(idx,1);
   gpTot(i);calcLive();}
 function setPrecoPedido(i,val){const it=CONTRATOS[EDIT.contrato].cat[i];const idx=EDIT.itens.findIndex(x=>norm(x.nome)===norm(it.n));if(idx>=0){EDIT.itens[idx].valor=+val||0;gpTot(i);calcLive();}}
 function gpTot(i){const it=CONTRATOS[EDIT.contrato].cat[i];const cur=EDIT.itens.find(x=>norm(x.nome)===norm(it.n));const el=$("#gp"+i);if(el)el.textContent=brl(cur?(+cur.qtd||0)*(+cur.valor||0):0);}
-/* ---- prazo ARCO (22h do dia anterior) ---- */
-function prazoArco(data){if(!data)return null;const d=new Date(data+"T00:00:00");d.setDate(d.getDate()-1);d.setHours(22,0,0,0);return d;}
-function prazoArcoHTML(s){const dl=prazoArco(s.data);if(!dl)return'';const passou=new Date()>dl;
-  return `<div class="${passou?'warn':'info'}" style="margin-bottom:8px">📅 Prazo do pedido ARCO: até <b>22h do dia anterior</b> (${dl.toLocaleDateString('pt-BR')} 22:00).${passou?' <b>⚠ Prazo já passou</b> — confirme com o cliente.':''}</div>`;}
+/* ---- prazo do pedido (hora limite do dia anterior, por contrato) ---- */
+function prazoPedido(contrato,data){const h=conf(contrato).prazoHora;if(!h||!data)return null;
+  const d=new Date(data+"T00:00:00");d.setDate(d.getDate()-1);d.setHours(h,0,0,0);return d;}
+function prazoPedidoHTML(s){const dl=prazoPedido(s.contrato,s.data);if(!dl)return'';const passou=new Date()>dl;const c=conf(s.contrato);
+  return `<div class="${passou?'warn':'info'}" style="margin-bottom:8px">📅 Prazo do pedido ${esc(c.curto||c.nome)}: até <b>${c.prazoHora}h do dia anterior</b> (${dl.toLocaleDateString('pt-BR')} ${c.prazoHora}:00).${passou?' <b>⚠ Prazo já passou</b> — confirme com o cliente.':''}</div>`;}
 /* ---- solicitação de pedido (anexo) ---- */
 function secSolicitacao(s){return `
   <div class="sec-tit">📎 Solicitação de pedido</div>
@@ -834,7 +844,7 @@ function lancarPedido(){coletarForm();
   if(!EDIT.cliente){alert("Coloque o cliente.");return;}
   if(!(EDIT.itens||[]).some(i=>+i.qtd>0)){alert("Coloque a quantidade de pelo menos um item.");return;}
   if(!EDIT.solicitacaoPedido){alert("📎 Anexe a solicitação de pedido — é obrigatória pra lançar.");return;}
-  if(EDIT.contrato==='arco'){const dl=prazoArco(EDIT.data);if(dl&&new Date()>dl){if(!confirm("O prazo do pedido ARCO (22h do dia anterior) já passou. Lançar mesmo assim?"))return;}}
+  {const dl=prazoPedido(EDIT.contrato,EDIT.data);if(dl&&new Date()>dl){if(!confirm("O prazo do pedido "+conf(EDIT.contrato).nome+" ("+conf(EDIT.contrato).prazoHora+"h do dia anterior) já passou. Lançar mesmo assim?"))return;}}
   const linhas=(EDIT.itens||[]).filter(i=>+i.qtd>0).map(i=>`<tr><td>${esc(i.nome)}</td><td style="text-align:center">${i.qtd}</td><td style="text-align:right">${brl((+i.qtd||0)*(+i.valor||0))}</td></tr>`).join("");
   modal(`<h3>Conferir pedido — ${CONTRATOS[EDIT.contrato].nome}</h3>
     <p class="muted">${esc(EDIT.cliente)} · ${esc(EDIT.data)}${EDIT.evento?' · '+esc(EDIT.evento):''}</p>
@@ -854,7 +864,7 @@ function setStatus(btn,st){btn.parentElement.querySelectorAll("button").forEach(
 function toggleCheck(i){EDIT.comprovacao.checklist['c'+i]=!EDIT.comprovacao.checklist['c'+i];const el=$("#checkBox").children[i];el.classList.toggle("done",EDIT.comprovacao.checklist['c'+i]);el.querySelector("input").checked=EDIT.comprovacao.checklist['c'+i];}
 
 function renderItens(){const box=$("#itensBox");if(!box)return;
-  const usaGrid=(EDIT.contrato==='arcelormittal'||EDIT.contrato==='arco');
+  const usaGrid=usaGridC(EDIT.contrato);
   const catN=usaGrid?catNames(EDIT.contrato):null;
   const linhas=EDIT.itens.map((it,i)=>({it,i})).filter(o=>usaGrid?!catN.has(norm(o.it.nome)):true);
   box.innerHTML=linhas.map(({it,i})=>`<div class="item-linha">
@@ -969,7 +979,7 @@ function salvarComprovacao(){EDIT.comprovacao.horaChegada=$("#cChegada").value;E
 function abrirDetalhe(id){const s=SERVICOS.find(x=>x.id===id);if(!s)return;const c=CONTRATOS[s.contrato]||{};const admin=isAdmin();
   const st={plan:["Planejado","plan"],and:["Em andamento","and"],entregue:["Entregue","ok"]}[s.status||"plan"];
   const checks=CHECKLIST.map((t,i)=>`<div style="font-size:13px;padding:2px 0">${s.comprovacao.checklist['c'+i]?"✅":"⬜"} ${t}</div>`).join("");
-  const usaGrid=(s.contrato==='arcelormittal'||s.contrato==='arco');
+  const usaGrid=usaGridC(s.contrato);
   const sp=s.solicitacaoPedido;
   const pedidoBloco = usaGrid ? `
     ${s.lancado?`<div class="chip ok" style="margin-bottom:8px">✅ Pedido lançado${s.lancadoPor?' por '+esc(s.lancadoPor):''}</div>`:`<div class="chip plan" style="margin-bottom:8px">📝 Rascunho — não lançado</div>`}
@@ -1059,7 +1069,7 @@ function renderCompras(){const host=$("#listaCompras");if(!host)return;
   }).join("");
 }
 function optgroupsEventosCompra(){
-  const grupos=[['evento','📅 VR · Eventos avulsos'],['arcelormittal','📅 Arcelormittal'],['arco','📅 ARCO Educação']];
+  const grupos=Object.keys(CONTRATOS).map(k=>[k,'📅 '+(k==='evento'?'VR · Eventos avulsos':CONTRATOS[k].nome)]);
   return grupos.map(([k,lbl])=>{
     const evs=[...SERVICOS].filter(s=>(s.contrato||'evento')===k).sort((a,b)=>(b.data||'').localeCompare(a.data||'')).slice(0,60);
     if(!evs.length)return '';
@@ -1076,11 +1086,7 @@ function formCompra(){
   </div>
   <div class="field"><label>🎯 Para qual empresa / evento? <span class="muted" style="text-transform:none">(a compra inteira entra no custo do evento escolhido; ou marque a empresa no "geral")</span></label>
     <select id="cEvento"><option value="">— não vinculado / vários eventos —</option>
-      <optgroup label="🏢 Empresa (geral — sem evento específico)">
-        <option value="emp:evento" ${EDITC.empresaGeral==='evento'?'selected':''}>VR · Eventos avulsos (geral)</option>
-        <option value="emp:arcelormittal" ${EDITC.empresaGeral==='arcelormittal'?'selected':''}>Arcelormittal (geral)</option>
-        <option value="emp:arco" ${EDITC.empresaGeral==='arco'?'selected':''}>ARCO Educação (geral)</option>
-      </optgroup>${optgroupsEventosCompra()}</select>
+      <optgroup label="🏢 Empresa (geral — sem evento específico)">${Object.keys(CONTRATOS).map(k=>`<option value="emp:${k}" ${EDITC.empresaGeral===k?'selected':''}>${k==='evento'?'VR · Eventos avulsos':esc(CONTRATOS[k].nome)} (geral)</option>`).join('')}</optgroup>${optgroupsEventosCompra()}</select>
     <p class="hint" style="margin-top:6px">Pra dividir a mesma compra entre <b>vários eventos/empresas</b>, salve e use <b>"🔀 Desmembrar entre eventos"</b> dentro da compra.</p></div>
   <div class="warn">📸 Foto do <b>comprovante (cupom/nota) é obrigatória</b> pra salvar.</div>
   <input type="file" accept="image/*" capture="environment" id="compInput" style="display:none" onchange="receberComprovante(this)">
