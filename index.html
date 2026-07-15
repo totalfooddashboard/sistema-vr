@@ -620,7 +620,54 @@ function novoServico(){
     gastos:[],comprovacao:{horaPrevista:"",horaChegada:"",obs:"",checklist:{}},fotos:[],status:"plan"};
   renderForm();
 }
-function podeEditarEvento(s){ if(isAdmin())return true; if(!s.lancado)return true; return !!(s.solicAlteracao&&s.solicAlteracao.status==='liberado'); }
+/* ---- rastreio de alteração de pedido lançado ---- */
+const podeAlterarLancado=()=>isAdmin()||(USER&&USER.permAlterar===true);
+function podeEditarEvento(s){ if(isAdmin())return true; if(!s.lancado)return true; if(podeAlterarLancado())return true; return !!(s.solicAlteracao&&s.solicAlteracao.status==='liberado'); }
+function snapshotEvento(s){return {itens:JSON.parse(JSON.stringify(s.itens||[])),data:s.data||"",horaEvento:s.horaEvento||"",local:s.local||"",pessoas:s.pessoas||"",descricaoPedido:s.descricaoPedido||"",total:faturamento(s),quando:new Date().toISOString(),por:(USER&&USER.nome)||""};}
+function mapaItens(arr){const m={};(arr||[]).forEach(it=>{if(!it||!it.nome)return;const k=norm(it.nome);
+    if(m[k])m[k].qtd=(+m[k].qtd||0)+(+it.qtd||0); else m[k]={nome:it.nome,qtd:+it.qtd||0,valor:+it.valor||0};});
+  Object.keys(m).forEach(k=>{if(!(+m[k].qtd))delete m[k];});return m;}
+function diffEvento(base,s){
+  const A=mapaItens(base.itens),B=mapaItens(s.itens);const add=[],rem=[],chg=[];
+  Object.keys(B).forEach(k=>{const b=B[k];if(!A[k])add.push({nome:b.nome,qtd:b.qtd,valor:b.valor,total:b.qtd*b.valor});});
+  Object.keys(A).forEach(k=>{const a=A[k];
+    if(!B[k]){rem.push({nome:a.nome,qtd:a.qtd,valor:a.valor,total:a.qtd*a.valor});return;}
+    const b=B[k],ta=a.qtd*a.valor,tb=b.qtd*b.valor;
+    if(a.qtd!==b.qtd||a.valor!==b.valor)chg.push({nome:b.nome,qtdA:a.qtd,qtdB:b.qtd,valorA:a.valor,valorB:b.valor,totalA:ta,totalB:tb,delta:tb-ta});});
+  const campos=[];
+  [["data","Data"],["horaEvento","Hora"],["local","Local"],["pessoas","Nº pessoas"],["descricaoPedido","O que vai no pedido"]].forEach(p=>{
+    const a=((base[p[0]]==null?"":base[p[0]])+"").trim(),b=((s[p[0]]==null?"":s[p[0]])+"").trim();
+    if(a!==b)campos.push({campo:p[1],antes:a||"—",depois:b||"—"});});
+  const totalA=+base.total||0,totalB=faturamento(s);
+  return {add:add,rem:rem,chg:chg,campos:campos,totalA:totalA,totalB:totalB,delta:totalB-totalA};}
+function temMudanca(d){return !!(d&&(d.add.length||d.rem.length||d.chg.length||d.campos.length));}
+// Se a versão JÁ SALVA do pedido estava lançada, exige justificativa e registra o que mudou.
+// Retorna false se o usuário cancelar (aí não salva).
+function registrarAlteracaoSeLancado(){
+  const prev=SERVICOS.find(x=>x.id===EDIT.id);
+  if(!prev||!prev.lancado)return true;                       // 1º lançamento / rascunho: sem rastreio
+  if(!EDIT.baseline)EDIT.baseline=snapshotEvento(prev);      // pedidos antigos: rastreio começa agora
+  const d=diffEvento(snapshotEvento(prev),EDIT);
+  if(!temMudanca(d))return true;
+  const j=prompt("✋ Este pedido JÁ FOI LANÇADO.\n\nO que mudou e por quê? A justificativa fica registrada no evento.");
+  if(j===null)return false;
+  if(!j.trim()){alert("A justificativa é obrigatória pra alterar um pedido lançado.");return false;}
+  EDIT.alteracoes=(EDIT.alteracoes||[]).concat([{quando:new Date().toISOString(),por:(USER&&USER.nome)||"",justificativa:j.trim(),diff:d}]);
+  return true;}
+function setaDelta(v){return v>0?`<span style="color:var(--verde);font-weight:800">▲ + ${brl(v)}</span>`
+  :v<0?`<span style="color:var(--vermelho);font-weight:800">▼ − ${brl(Math.abs(v))}</span>`
+  :`<span class="muted">= valor não mudou</span>`;}
+function blocoDiff(d,titulo){
+  if(!temMudanca(d))return "";
+  let h=`<div style="border:1px solid var(--linha);border-radius:10px;padding:10px;margin-bottom:8px">
+    <div style="font-weight:800;font-size:13px;margin-bottom:6px">${esc(titulo)}</div>`;
+  d.add.forEach(i=>h+=`<div style="font-size:13px;padding:3px 0"><span style="color:var(--verde);font-weight:800">+ incluído</span> ${esc(i.nome)} — ${i.qtd}× ${brl(i.valor)} = <b>${brl(i.total)}</b></div>`);
+  d.rem.forEach(i=>h+=`<div style="font-size:13px;padding:3px 0"><span style="color:var(--vermelho);font-weight:800">− retirado</span> ${esc(i.nome)} — era ${i.qtd}× ${brl(i.valor)} = <b>${brl(i.total)}</b></div>`);
+  d.chg.forEach(i=>h+=`<div style="font-size:13px;padding:3px 0"><b>${esc(i.nome)}</b>${i.qtdA!==i.qtdB?` · qtd ${i.qtdA} → <b>${i.qtdB}</b>`:''}${i.valorA!==i.valorB?` · ${brl(i.valorA)} → <b>${brl(i.valorB)}</b>`:''} ${setaDelta(i.delta)}</div>`);
+  d.campos.forEach(c=>h+=`<div style="font-size:13px;padding:3px 0">📝 <b>${esc(c.campo)}</b>: ${esc(c.antes)} → <b>${esc(c.depois)}</b></div>`);
+  h+=`<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;border-top:1px dashed var(--linha);margin-top:6px;padding-top:6px;font-size:13.5px">
+    <span>Total: ${brl(d.totalA)} → <b>${brl(d.totalB)}</b></span>${setaDelta(d.delta)}</div></div>`;
+  return h;}
 function editarServico(id){const s=SERVICOS.find(x=>x.id===id);if(!s)return;
   if(!podeEditarEvento(s)){alert("Este pedido já foi lançado. Peça autorização ao gestor pra alterar.");return;}
   EDIT=JSON.parse(JSON.stringify(s));fecharModal();tab("novo");renderForm();}
@@ -782,10 +829,13 @@ function lancarPedido(){coletarForm();
     <table class="tabela"><tr><th>Item</th><th style="text-align:center">Qtd</th><th style="text-align:right">Valor</th></tr>${linhas}
       <tr><td colspan="2"><b>Total</b></td><td style="text-align:right"><b>${brl(faturamento(EDIT))}</b></td></tr></table>
     <div class="info" style="margin-top:10px">📎 Solicitação anexada ✅</div>
-    <p class="hint">Confira se está tudo certo. Depois de lançado, <b>só o dono exclui</b> e pra <b>alterar precisa de autorização</b>.</p>
+    <p class="hint">Confira se está tudo certo. Depois de lançado, <b>só o dono exclui</b>. Toda <b>alteração exige justificativa</b> e o sistema registra o que subiu/baixou em relação a este pedido original.</p>
     <button class="btn gh" onclick="confirmarLancamento()">✅ Está correto — LANÇAR</button>
     <button class="btn sec" style="margin-top:8px" onclick="fecharModal()">Voltar e corrigir</button>`);}
-function confirmarLancamento(){EDIT.lancado=true;EDIT.lancadoEm=new Date().toISOString();EDIT.lancadoPor=USER.nome;if(EDIT.status==='plan')EDIT.status='and';if(EDIT.solicAlteracao&&EDIT.solicAlteracao.status==='liberado')EDIT.solicAlteracao=null;
+function confirmarLancamento(){
+  if(!registrarAlteracaoSeLancado()){fecharModal();return;}   // re-lançar um pedido já lançado = alteração, exige justificativa
+  EDIT.lancado=true;EDIT.lancadoEm=EDIT.lancadoEm||new Date().toISOString();EDIT.lancadoPor=EDIT.lancadoPor||USER.nome;if(EDIT.status==='plan')EDIT.status='and';if(EDIT.solicAlteracao&&EDIT.solicAlteracao.status==='liberado')EDIT.solicAlteracao=null;
+  if(!EDIT.baseline)EDIT.baseline=snapshotEvento(EDIT); // "pedido original" — base de comparação de toda alteração futura
   cloudSet(COL.ev,EDIT);montarFiltroMes();EDIT=null;fecharModal();tab("eventos");setTimeout(()=>alert("Pedido lançado ✅"),100);}
 function mudarContrato(k){coletarForm();EDIT.contrato=k;renderForm();}
 function setStatus(btn,st){btn.parentElement.querySelectorAll("button").forEach(b=>b.classList.remove("on"));btn.classList.add("on");EDIT.status=st;calcLive();}
@@ -836,6 +886,7 @@ function coletarForm(){if(!$("#fCliente"))return;
 }
 function salvarServico(){coletarForm();
   if(!EDIT.cliente){alert("Coloque pelo menos o cliente/evento.");return;}
+  if(!registrarAlteracaoSeLancado())return;
   if(EDIT.solicAlteracao&&EDIT.solicAlteracao.status==='liberado')EDIT.solicAlteracao=null; // volta a travar depois da alteração autorizada
   cloudSet(COL.ev,EDIT);montarFiltroMes();EDIT=null;tab("eventos");}
 function cancelarForm(){EDIT=null;tab("eventos");}
@@ -915,6 +966,15 @@ function abrirDetalhe(id){const s=SERVICOS.find(x=>x.id===id);if(!s)return;const
     ${custoComprasAloc(s.id)?`<div style="display:flex;justify-content:space-between;font-size:13.5px;padding:4px 0;border-bottom:1px dashed var(--linha)"><span>🛒 Compras desmembradas</span><b>${brl(custoComprasAloc(s.id))}</b></div>`:''}`:"";
   const cdev=comprasDoEvento(s.id);
   const compBloco=(!admin && podeVer('cmv') && cdev.length)?`<div class="sec-tit">🛒 Compras usadas neste evento</div>${cdev.map(o=>`<div style="display:flex;justify-content:space-between;font-size:13.5px;padding:4px 0;border-bottom:1px dashed var(--linha);cursor:pointer" onclick="abrirCompra('${o.compra.id}')"><span>${esc(o.compra.fornecedor||'compra')} · ${esc(o.compra.data||'')}<div class="muted" style="font-size:11px">${esc(o.its.join(', '))}</div></span><b>${brl(o.valor)}</b></div>`).join('')}<div style="display:flex;justify-content:space-between;padding:6px 0;font-weight:800"><span>Custo de compras (entra no CMV)</span><b>${brl(custoComprasAloc(s.id))}</b></div>`:'';
+  const dCum=(s.baseline)?diffEvento(s.baseline,s):null;
+  const hist=(s.alteracoes||[]);
+  const altBloco=(hist.length||temMudanca(dCum))?`
+    <div class="sec-tit">🔄 Alterações do pedido</div>
+    ${temMudanca(dCum)?blocoDiff(dCum,"📊 Comparado com o pedido ORIGINAL (1º lançamento)"):'<div class="info">✅ O pedido está igual ao original.</div>'}
+    ${hist.map(a=>`<div style="background:#f8fafc;border-left:3px solid var(--lar);border-radius:8px;padding:8px 10px;margin-bottom:8px">
+      <div class="muted" style="font-size:11.5px;font-weight:700">${new Date(a.quando).toLocaleString('pt-BR')} · por ${esc(a.por||'—')}</div>
+      <div style="font-size:13.5px;margin:4px 0"><b>Justificativa:</b> ${esc(a.justificativa||'')}</div>
+      ${a.diff?blocoDiff(a.diff,'O que essa alteração mudou'):''}</div>`).join('')}`:'';
   const mats=(s.materiais||[]).filter(m=>m&&m.nome);
   const detBloco=(s.detalhes||mats.length)?`
     ${s.detalhes?`<div class="sec-tit">📋 Detalhes do evento</div><p style="font-size:13.5px;white-space:pre-wrap;margin:0">${esc(s.detalhes)}</p>`:''}
@@ -932,6 +992,7 @@ function abrirDetalhe(id){const s=SERVICOS.find(x=>x.id===id);if(!s)return;const
     ${s.local?`<p style="margin:0 0 8px">📍 ${esc(s.local)}</p>`:""}
     ${bannerAlt}
     ${pedidoBloco}
+    ${altBloco}
     ${finBloco}
     ${detBloco}
     ${compBloco}
@@ -1528,7 +1589,7 @@ function renderConfig(){if(!isAdmin())return;
 }
 function renderFuncBox(){const b=$("#funcBox");if(!b)return;
   if(!FUNCIONARIOS.length){b.innerHTML=`<p class="muted" style="font-size:13px;text-align:center;padding:8px">Nenhum funcionário cadastrado ainda.</p>`;return;}
-  b.innerHTML=FUNCIONARIOS.map(f=>{const ics=[f.permContas?'💳':'',f.permRecibos?'🧾':'',f.permCmv?'🧮':'',f.permPrecos?'💲':'',f.permEstoque?'📦':''].join('');
+  b.innerHTML=FUNCIONARIOS.map(f=>{const ics=[f.permContas?'💳':'',f.permRecibos?'🧾':'',f.permCmv?'🧮':'',f.permPrecos?'💲':'',f.permEstoque?'📦':'',f.permAlterar?'✏️':''].join('');
    return `<div class="item-linha" style="background:${f.ativo===false?'#f8fafc':'#fff'};flex-wrap:wrap">
     <div class="nm" style="flex:1 1 100%">${esc(f.nome)}${f.ativo===false?' <span class="muted" style="font-weight:600">(inativo)</span>':''}${ics?' <span class="tag" style="background:var(--amar-claro);color:#b45309;font-size:11px">'+ics+'</span>':''}<div class="muted" style="font-size:11px;font-weight:600">${esc(f.email||'')}</div></div>
     <button class="btn sm sec" style="flex:0 0 auto" onclick="reenviarSenhaFunc('${esc(f.email)}')">📧 senha</button>
@@ -1543,11 +1604,12 @@ function editarAcessos(id){const f=FUNCIONARIOS.find(x=>x.id===id);if(!f)return;
     <label class="check"><input type="checkbox" id="acM" ${f.permCmv?'checked':''}><span>🧮 CMV</span></label>
     <label class="check"><input type="checkbox" id="acP" ${f.permPrecos?'checked':''}><span>💲 Preços</span></label>
     <label class="check"><input type="checkbox" id="acS" ${f.permEstoque?'checked':''}><span>📦 Lançar/ajustar Estoque (ler nota, +item, valores)</span></label>
-    <button class="btn sec sm" style="width:100%;margin:8px 0" onclick="document.querySelectorAll('#acC,#acR,#acM,#acP,#acS').forEach(c=>c.checked=true)">🧑‍💼 Marcar todos (Gerente)</button>
+    <label class="check"><input type="checkbox" id="acA" ${f.permAlterar?'checked':''}><span>✏️ Alterar pedido já lançado (exige justificativa e fica registrado)</span></label>
+    <button class="btn sec sm" style="width:100%;margin:8px 0" onclick="document.querySelectorAll('#acC,#acR,#acM,#acP,#acS,#acA').forEach(c=>c.checked=true)">🧑‍💼 Marcar todos (Gerente)</button>
     <button class="btn gh" onclick="salvarAcessos('${id}')">Salvar acessos</button>
     <button class="btn sec" style="margin-top:8px" onclick="fecharModal()">Cancelar</button>`);}
 function salvarAcessos(id){const f=FUNCIONARIOS.find(x=>x.id===id);if(!f)return;
-  f.permContas=$("#acC").checked;f.permRecibos=$("#acR").checked;f.permCmv=$("#acM").checked;f.permPrecos=$("#acP").checked;f.permEstoque=$("#acS").checked;
+  f.permContas=$("#acC").checked;f.permRecibos=$("#acR").checked;f.permCmv=$("#acM").checked;f.permPrecos=$("#acP").checked;f.permEstoque=$("#acS").checked;f.permAlterar=$("#acA").checked;
   cloudSet(COL.user,f);fecharModal();renderFuncBox();}
 function addFuncionario(){
   modal(`<h3>👷 Cadastrar funcionário</h3>
@@ -1569,7 +1631,7 @@ async function salvarFuncionario(){
     const cred=await sec.auth().createUserWithEmailAndPassword(email,senha);
     const uid=cred.user.uid; await sec.auth().signOut();
     const g=!!($("#fnGerente")&&$("#fnGerente").checked);
-    await cloudSet(COL.user,{id:uid,uid:uid,email:email,nome:nome,role:"func",ativo:true,permContas:g,permRecibos:g,permCmv:g,permPrecos:g,permEstoque:g,criadoEm:Date.now()});
+    await cloudSet(COL.user,{id:uid,uid:uid,email:email,nome:nome,role:"func",ativo:true,permContas:g,permRecibos:g,permCmv:g,permPrecos:g,permEstoque:g,permAlterar:g,criadoEm:Date.now()});
     fecharModal();alert("Funcionário criado ✅\nEle já pode entrar com o email:\n"+email);
   }catch(e){const c=((e.code)||"")+"";
     if(c.indexOf("email-already-in-use")>=0)alert("Esse email já tem conta. Se for da equipe, peça pra usar 'esqueci minha senha'.");
@@ -1622,7 +1684,7 @@ function refreshUI(){if(!USER)return;const t=CURRENT_TAB;
 async function resolverPapel(user){
   if((user.email||"").toLowerCase()===ADMIN_EMAIL)return {papel:"admin",nome:"Marcelo"};
   try{const d=await DB.collection(COL.user).doc(user.uid).get();
-    if(d.exists){const x=d.data();if(x.ativo===false)return {bloqueado:true};return {papel:x.role||"func",nome:x.nome||user.email,permContas:!!x.permContas,permRecibos:!!x.permRecibos,permCmv:!!x.permCmv,permPrecos:!!x.permPrecos,permEstoque:!!x.permEstoque};}}catch(e){}
+    if(d.exists){const x=d.data();if(x.ativo===false)return {bloqueado:true};return {papel:x.role||"func",nome:x.nome||user.email,permContas:!!x.permContas,permRecibos:!!x.permRecibos,permCmv:!!x.permCmv,permPrecos:!!x.permPrecos,permEstoque:!!x.permEstoque,permAlterar:!!x.permAlterar};}}catch(e){}
   return {papel:"func",nome:user.email};
 }
 carregarConfLocal();
@@ -1632,7 +1694,7 @@ if(FB_OK){
       const b=$("#btnEntrar");if(b){b.textContent="Entrar";b.disabled=false;}return;}
     const r=await resolverPapel(user);
     if(r.bloqueado){alert("Seu acesso foi desativado. Fale com o gestor.");AUTH.signOut();return;}
-    USER={uid:user.uid,email:user.email,nome:r.nome,papel:r.papel,permContas:!!r.permContas,permRecibos:!!r.permRecibos,permCmv:!!r.permCmv,permPrecos:!!r.permPrecos,permEstoque:!!r.permEstoque};
+    USER={uid:user.uid,email:user.email,nome:r.nome,papel:r.papel,permContas:!!r.permContas,permRecibos:!!r.permRecibos,permCmv:!!r.permCmv,permPrecos:!!r.permPrecos,permEstoque:!!r.permEstoque,permAlterar:!!r.permAlterar};
     if(r.papel==="admin")cloudSet(COL.user,{id:user.uid,uid:user.uid,email:user.email,nome:r.nome,role:"admin",ativo:true});
     iniciar();
   });
