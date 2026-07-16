@@ -776,6 +776,7 @@ function renderForm(){
   <label>Checklist de qualidade</label>
   <div id="checkBox" style="margin-bottom:12px">${CHECKLIST.map((t,i)=>`<div class="check ${s.comprovacao.checklist['c'+i]?'done':''}" onclick="toggleCheck(${i})"><input type="checkbox" ${s.comprovacao.checklist['c'+i]?'checked':''} onclick="event.stopPropagation();toggleCheck(${i})"><span>${t}</span></div>`).join("")}</div>
   <label>Fotos (data/hora e local são carimbados na imagem)</label>
+  <p class="hint" style="margin:-2px 0 6px">🏗️ A <b>montagem</b> exige no mínimo <b>${MIN_FOTOS_MONTAGEM} fotos</b> — toque em "Montagem" quantas vezes precisar.</p>
   <input type="file" accept="image/*" capture="environment" id="fotoInput" style="display:none" onchange="receberFoto(this)">
   <input type="file" accept="image/*" id="fotoInputLib" style="display:none" onchange="receberFoto(this)">
   <div class="row" style="margin-bottom:6px">
@@ -789,6 +790,7 @@ function renderForm(){
     <button class="btn sec sm" style="width:100%" onclick="fotoDaBiblioteca('Entrega')">🖼️ Entrega</button>
   </div>
   <div class="fotos-grid" id="fotosGrid"></div>
+  <div id="fotoStatus"></div>
   <div class="field" style="margin-top:12px"><label>Observações</label><textarea id="cObs" rows="2" placeholder="Intercorrências, elogios, ajustes...">${esc(s.comprovacao.obs)}</textarea></div>
   <div class="field"><label>Status</label><div class="pill-select">
     <button class="${s.status==='plan'?'on':''}" onclick="setStatus(this,'plan')">Planejado</button>
@@ -874,7 +876,19 @@ function confirmarLancamento(){
   if(!EDIT.baseline)EDIT.baseline=snapshotEvento(EDIT); // "pedido original" — base de comparação de toda alteração futura
   cloudSet(COL.ev,EDIT);montarFiltroMes();EDIT=null;fecharModal();tab("eventos");setTimeout(()=>alert("Pedido lançado ✅"),100);}
 function mudarContrato(k){coletarForm();EDIT.contrato=k;renderForm();}
-function setStatus(btn,st){btn.parentElement.querySelectorAll("button").forEach(b=>b.classList.remove("on"));btn.classList.add("on");EDIT.status=st;calcLive();}
+/* ---- regras pra FINALIZAR (Entregue) um evento ---- */
+const MIN_FOTOS_MONTAGEM=2;
+function contaFotos(s,tipo){return (s.fotos||[]).filter(f=>norm(f.tipo||"")===norm(tipo)).length;}
+function checklistCompleto(s){return CHECKLIST.every((_,i)=>!!(s.comprovacao&&s.comprovacao.checklist&&s.comprovacao.checklist['c'+i]));}
+function bloqueioFinalizar(s){const faltas=[];
+  if(!checklistCompleto(s))faltas.push("marcar TODOS os itens do checklist de qualidade");
+  const nm=contaFotos(s,'Montagem');
+  if(nm<MIN_FOTOS_MONTAGEM)faltas.push(`anexar pelo menos ${MIN_FOTOS_MONTAGEM} fotos da MONTAGEM (tem ${nm})`);
+  if(!(s.comprovacao&&s.comprovacao.horaChegada))faltas.push("registrar a hora que chegou no cliente");
+  return faltas.length?("Pra finalizar o evento (Entregue), ainda falta:\n\n• "+faltas.join("\n• ")):null;}
+function setStatus(btn,st){
+  if(st==='entregue'){const erro=bloqueioFinalizar(EDIT);if(erro){alert(erro);return;}}
+  btn.parentElement.querySelectorAll("button").forEach(b=>b.classList.remove("on"));btn.classList.add("on");EDIT.status=st;calcLive();}
 function toggleCheck(i){EDIT.comprovacao.checklist['c'+i]=!EDIT.comprovacao.checklist['c'+i];const el=$("#checkBox").children[i];el.classList.toggle("done",EDIT.comprovacao.checklist['c'+i]);el.querySelector("input").checked=EDIT.comprovacao.checklist['c'+i];}
 
 function renderItens(){const box=$("#itensBox");if(!box)return;
@@ -923,6 +937,7 @@ function coletarForm(){if(!$("#fCliente"))return;
 }
 function salvarServico(){coletarForm();
   if(!EDIT.cliente){alert("Coloque pelo menos o cliente/evento.");return;}
+  if(EDIT.status==='entregue'){const erro=bloqueioFinalizar(EDIT);if(erro){EDIT.status='and';alert(erro);renderForm();return;}}
   if(!registrarAlteracaoSeLancado())return;
   if(EDIT.solicAlteracao&&EDIT.solicAlteracao.status==='liberado')EDIT.solicAlteracao=null; // volta a travar depois da alteração autorizada
   cloudSet(COL.ev,EDIT);montarFiltroMes();EDIT=null;tab("eventos");}
@@ -950,7 +965,9 @@ function receberFoto(input){const file=input.files&&input.files[0];if(!file)retu
   // foto da biblioteca não carimba GPS: a localização de agora não é onde a foto foi feita
   if(!daBib&&navigator.geolocation)navigator.geolocation.getCurrentPosition(p=>{geo={lat:p.coords.latitude,lng:p.coords.longitude};proc();},()=>proc(),{timeout:4000,maximumAge:60000});else proc();}
 function renderFotos(){const g=$("#fotosGrid");if(!g)return;
-  g.innerHTML=(EDIT.fotos||[]).map((f,i)=>`<div class="foto-item"><img src="${f.dataUrl}" onclick="verFoto('${f.dataUrl}')"><div class="del" onclick="EDIT.fotos.splice(${i},1);renderFotos()">✕</div><div class="lbl">${esc(f.tipo)}${f.geo?" 📍":""}</div></div>`).join("");}
+  g.innerHTML=(EDIT.fotos||[]).map((f,i)=>`<div class="foto-item"><img src="${f.dataUrl}" onclick="verFoto('${f.dataUrl}')"><div class="del" onclick="EDIT.fotos.splice(${i},1);renderFotos()">✕</div><div class="lbl">${esc(f.tipo)}${f.geo?" 📍":""}</div></div>`).join("");
+  const fs=$("#fotoStatus");if(fs){const nm=contaFotos(EDIT,'Montagem');
+    fs.innerHTML=`<div class="${nm>=MIN_FOTOS_MONTAGEM?'info':'warn'}" style="margin-top:8px">🏗️ Fotos da <b>montagem</b>: <b>${nm}/${MIN_FOTOS_MONTAGEM}</b> ${nm>=MIN_FOTOS_MONTAGEM?'✅ mínimo atingido':'— tire pelo menos '+MIN_FOTOS_MONTAGEM+' fotos da montagem pra poder finalizar'}</div>`;}}
 function verFoto(src){modal(`<img src="${src}" style="width:100%;border-radius:12px"><button class="btn sec" style="margin-top:10px" onclick="fecharModal()">Fechar</button>`);}
 
 /* ---- registrar entrega (fotos + chegada) — livre p/ funcionário, mesmo lançado ---- */
@@ -966,6 +983,7 @@ function formComprovacao(){const s=EDIT;
       <button class="btn" style="flex:0 0 auto;white-space:nowrap;padding:11px 14px" onclick="$('#cChegada').value=agora()">🕐 Cheguei agora</button></div>
       <p class="hint">O "cheguei agora" pega a hora do seu celular automaticamente.</p></div>
     <label>Fotos da entrega (data, hora e local carimbados)</label>
+    <p class="hint" style="margin:-2px 0 6px">🏗️ A <b>montagem</b> exige no mínimo <b>${MIN_FOTOS_MONTAGEM} fotos</b> pra finalizar — toque em "Montagem" quantas vezes precisar.</p>
     <input type="file" accept="image/*" capture="environment" id="fotoInput" style="display:none" onchange="receberFoto(this)">
     <input type="file" accept="image/*" id="fotoInputLib" style="display:none" onchange="receberFoto(this)">
     <div class="row" style="margin-bottom:6px">
@@ -977,6 +995,7 @@ function formComprovacao(){const s=EDIT;
       <button class="btn sec sm" style="width:100%" onclick="fotoDaBiblioteca('Montagem')">🖼️ Montagem</button>
       <button class="btn sec sm" style="width:100%" onclick="fotoDaBiblioteca('Entrega')">🖼️ Entrega</button></div>
     <div class="fotos-grid" id="fotosGrid"></div>
+    <div id="fotoStatus"></div>
     <label style="margin-top:12px">Checklist de qualidade</label>
     <div id="checkBox" style="margin-bottom:12px">${CHECKLIST.map((t,i)=>`<div class="check ${s.comprovacao.checklist['c'+i]?'done':''}" onclick="toggleCheck(${i})"><input type="checkbox" ${s.comprovacao.checklist['c'+i]?'checked':''} onclick="event.stopPropagation();toggleCheck(${i})"><span>${t}</span></div>`).join("")}</div>
     <div class="field"><label>Observações</label><textarea id="cObs" rows="2" placeholder="Intercorrências, elogios...">${esc(s.comprovacao.obs||'')}</textarea></div>
@@ -987,6 +1006,7 @@ function formComprovacao(){const s=EDIT;
     <button class="btn sec" style="margin-top:8px" onclick="EDIT=null;fecharModal()">Cancelar</button>`);
   renderFotos();}
 function salvarComprovacao(){EDIT.comprovacao.horaChegada=$("#cChegada").value;EDIT.comprovacao.obs=$("#cObs").value;
+  if(EDIT.status==='entregue'){const erro=bloqueioFinalizar(EDIT);if(erro){EDIT.status='and';alert(erro);formComprovacao();renderFotos();return;}}
   cloudSet(COL.ev,EDIT);EDIT=null;fecharModal();render();setTimeout(()=>alert("Entrega registrada ✅"),100);}
 
 /* ---- detalhe evento ---- */
