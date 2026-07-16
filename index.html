@@ -1284,6 +1284,73 @@ async function lerContratoIA(dataUrl,nome){
   }catch(e){alert("Não consegui ler o contrato com a IA.\n\n"+e.message+"\n\nPode preencher na mão.");
     const b=$("#btnIAContrato");if(b){b.innerHTML="🤖 Ler contrato com IA (foto ou PDF)";b.disabled=false;}}
 }
+/* ---- IA: ler BOLETO e extrair a linha digitável (foto ou PDF) ---- */
+async function iaLerBoleto(dataUrl){
+  if(!CONFIG.apiKey)await carregarConfigNuvem();
+  if(!CONFIG.apiKey)throw new Error("A leitura por IA ainda não foi ativada. O dono precisa colar a chave da Anthropic em ⚙️ Configurações.");
+  const [meta,b64]=(dataUrl||"").split(",");const media=(meta.match(/data:(.*?);/)||[])[1]||"image/jpeg";
+  const ehPdf=/pdf/i.test(media);
+  const prompt=`Você lê BOLETOS bancários brasileiros. Extraia os dados deste boleto.
+Responda APENAS com um JSON válido, sem texto antes ou depois:
+{"linhaDigitavel":"","valor":0,"vencimento":"AAAA-MM-DD","beneficiario":""}
+Regras:
+- "linhaDigitavel" = a sequência numérica impressa no TOPO do boleto (a "linha digitável"), normalmente 47 dígitos (boleto bancário) ou 48 (conta de consumo/concessionária), mostrada em blocos separados por pontos e espaços. Devolva **APENAS OS DÍGITOS**, sem pontos, sem espaços. Se não conseguir ler TODOS os dígitos com certeza, devolva "" (string vazia) — não invente nem complete.
+- "valor" = valor do documento em R$, com ponto decimal.
+- "vencimento" = data de vencimento no formato AAAA-MM-DD.
+- "beneficiario" = nome de quem recebe (cedente/beneficiário).`;
+  const bloco=ehPdf?{type:"document",source:{type:"base64",media_type:"application/pdf",data:b64}}
+                   :{type:"image",source:{type:"base64",media_type:media,data:b64}};
+  const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",
+    headers:{"content-type":"application/json","x-api-key":CONFIG.apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+    body:JSON.stringify({model:CONFIG.modelo||"claude-sonnet-5",max_tokens:1500,messages:[{role:"user",content:[bloco,{type:"text",text:prompt}]}]})});
+  if(!res.ok){const er=await res.text();throw new Error("API "+res.status+": "+er.slice(0,180));}
+  const data=await res.json();
+  let t=((data.content||[]).filter(c=>c.type==="text").map(c=>c.text||"").join("")||"").trim();
+  t=t.replace(/```json/gi,"").replace(/```/g,"").trim();
+  const a=t.indexOf("{"),z=t.lastIndexOf("}");if(a>=0&&z>a)t=t.slice(a,z+1);
+  const obj=JSON.parse(t);
+  obj.linhaDigitavel=(obj.linhaDigitavel||"").replace(/\D/g,""); // só dígitos, pronto pra colar no banco
+  return obj;
+}
+function receberBoleto(input){const file=input.files&&input.files[0];if(!file)return;input.value="";
+  const ehPdf=/pdf/i.test(file.type||"")||/\.pdf$/i.test(file.name||"");
+  const reader=new FileReader();
+  reader.onload=e=>{
+    if(ehPdf){lerBoletoIA(e.target.result,file.name,null);return;}
+    const img=new Image();
+    img.onload=()=>{const max=1600;let w=img.width,h=img.height;
+      if(w>h&&w>max){h=h*max/w;w=max;}else if(h>max){w=w*max/h;h=max;}
+      const cv=document.createElement("canvas");cv.width=w;cv.height=h;cv.getContext("2d").drawImage(img,0,0,w,h);
+      const preview=cv.toDataURL("image/jpeg",0.6);
+      lerBoletoIA(preview,file.name,preview);};
+    img.onerror=()=>alert("Não consegui abrir esse arquivo. Use uma foto (JPG/PNG) ou um PDF do boleto.");
+    img.src=e.target.result;};
+  reader.readAsDataURL(file);}
+async function lerBoletoIA(dataUrl,nome,preview){
+  const btn=$("#btnIABoleto");if(btn){btn.innerHTML=`<span class="spin"></span> Lendo boleto...`;btn.disabled=true;}
+  try{
+    coletarConta();
+    const obj=await iaLerBoleto(dataUrl);
+    const c=EDITCONTA;
+    c.formaPag="Boleto";
+    if(obj.linhaDigitavel)c.codigoBoleto=obj.linhaDigitavel;
+    if((+obj.valor)>0&&!(+c.valor))c.valor=+obj.valor;
+    if(obj.vencimento&&/^\d{4}-\d{2}-\d{2}$/.test(obj.vencimento))c.vencimento=obj.vencimento;
+    if(obj.beneficiario&&!c.fornecedor)c.fornecedor=obj.beneficiario;
+    if(preview)c.boletoFoto=preview;c.boletoNome=nome||"boleto";
+    const n=(obj.linhaDigitavel||"").length;
+    formConta();
+    const b=$("#btnIABoleto");
+    if(b){
+      if(obj.linhaDigitavel&&(n===47||n===48)){b.innerHTML="✅ Boleto lido — código preenchido";}
+      else if(obj.linhaDigitavel){b.innerHTML="⚠ Li o boleto, confira o código ("+n+" dígitos)";}
+      else {b.innerHTML="⚠ Não consegui ler o código — confira/digite";}
+      b.disabled=false;
+      setTimeout(()=>{const b2=$("#btnIABoleto");if(b2){b2.innerHTML="🤖 Carregar boleto e ler o código (foto ou PDF)";}},4000);
+    }
+  }catch(e){alert("Não consegui ler o boleto com a IA.\n\n"+e.message+"\n\nPode digitar o código na mão.");
+    const b=$("#btnIABoleto");if(b){b.innerHTML="🤖 Carregar boleto e ler o código (foto ou PDF)";b.disabled=false;}}
+}
 async function lerComprovanteIA(){
   if(!EDITC.comprovanteFoto){alert("Bata a foto do comprovante primeiro.");return;}
   const btn=$("#btnIA");const txt=btn.innerHTML;btn.innerHTML=`<span class="spin"></span> Lendo comprovante...`;btn.disabled=true;
@@ -1442,7 +1509,7 @@ function renderContas(){const host=$("#listaContas");if(!host)return;
     </div>`;}).join("");
 }
 function diasPara(d){const a=new Date(hoje()+"T00:00:00"),b=new Date(d+"T00:00:00");return Math.round((b-a)/86400000);}
-function novaConta(){EDITCONTA={id:uid(),criadoEm:Date.now(),criadoPor:USER.nome,tipo:TIPOS_SERVICO[0],fornecedor:"",motivo:"",compraId:"",itens:[],especificacoes:"",valor:"",vencimento:hoje(),formaPag:"PIX",chavePix:"",codigoBoleto:"",pago:false,pagoEm:""};formConta();}
+function novaConta(){EDITCONTA={id:uid(),criadoEm:Date.now(),criadoPor:USER.nome,tipo:TIPOS_SERVICO[0],fornecedor:"",motivo:"",compraId:"",itens:[],especificacoes:"",valor:"",vencimento:hoje(),formaPag:"PIX",chavePix:"",codigoBoleto:"",boletoFoto:null,boletoNome:"",pago:false,pagoEm:""};formConta();}
 function editarConta(id){EDITCONTA=JSON.parse(JSON.stringify(CONTAS.find(c=>c.id===id)));fecharModal();formConta();}
 function formConta(){const c=EDITCONTA;
   const comprasOpt=[...COMPRAS].sort((a,b)=>(b.data||'').localeCompare(a.data||'')).slice(0,60);
@@ -1463,13 +1530,26 @@ function formConta(){const c=EDITCONTA;
     <div class="sec-tit">💳 Como pagar</div>
     <div class="field"><label>Forma de pagamento</label><select id="ctForma">${FORMAS_PAG.map(f=>`<option ${c.formaPag===f?'selected':''}>${f}</option>`).join('')}</select></div>
     <div class="field"><label>Chave PIX <span class="muted" style="text-transform:none">(se for PIX)</span></label><input id="ctPix" value="${esc(c.chavePix||'')}" placeholder="CNPJ, email, telefone ou chave aleatória"></div>
-    <div class="field"><label>Código do boleto <span class="muted" style="text-transform:none">(se for boleto)</span></label><input id="ctBoleto" value="${esc(c.codigoBoleto||'')}" placeholder="Linha digitável do boleto"></div>
+    <div class="sec-tit" style="font-size:13px">📄 Boleto</div>
+    <input type="file" accept="image/*,application/pdf" id="ctBolInput" style="display:none" onchange="receberBoleto(this)">
+    <button class="btn ia" id="btnIABoleto" style="width:100%" onclick="$('#ctBolInput').click()">🤖 Carregar boleto e ler o código (foto ou PDF)</button>
+    <p class="hint" style="margin:6px 0 8px">A IA lê a linha digitável e preenche o código, o valor e o vencimento — é só conferir e copiar.</p>
+    <div id="ctBolFotoBox"></div>
+    <div class="field"><label>Código do boleto <span class="muted" style="text-transform:none">(linha digitável)</span></label>
+      <div style="display:flex;gap:6px"><input id="ctBoleto" value="${esc(c.codigoBoleto||'')}" placeholder="Carregue o boleto acima ou digite" style="flex:1">${c.codigoBoleto?`<button class="btn sm" style="flex:0 0 auto" onclick="copiarCampoBoleto()">📋 Copiar</button>`:''}</div></div>
     <div class="field"><label>Situação</label><div class="pill-select">
       <button id="ctAberto" class="${!c.pago?'on':''}" onclick="this.parentElement.querySelectorAll('button').forEach(x=>x.classList.remove('on'));this.classList.add('on')">Em aberto</button>
       <button id="ctPago" class="${c.pago?'on':''}" onclick="this.parentElement.querySelectorAll('button').forEach(x=>x.classList.remove('on'));this.classList.add('on')">Já paga</button></div></div>
     <button class="btn gh" onclick="salvarConta()">Salvar conta</button>
     <button class="btn sec" style="margin-top:8px" onclick="fecharModal()">Cancelar</button>`);
-  renderItensConta();}
+  renderItensConta();renderBoletoFoto();}
+function renderBoletoFoto(){const b=$("#ctBolFotoBox");if(!b)return;const c=EDITCONTA;
+  b.innerHTML=c.boletoFoto?`<img src="${c.boletoFoto}" class="comprov-foto" onclick="verFoto('${c.boletoFoto}')">`:(c.boletoNome&&!c.boletoFoto?`<div class="info" style="margin-bottom:6px">📄 ${esc(c.boletoNome)} (PDF lido)</div>`:'');}
+function copiarCampoBoleto(){coletarConta();const t=(EDITCONTA.codigoBoleto||'').replace(/\D/g,'');if(!t){alert("Sem código pra copiar.");return;}
+  const done=()=>{const btn=event&&event.target;if(btn){const o=btn.textContent;btn.textContent="✅ Copiado";setTimeout(()=>btn.textContent=o,1500);}};
+  if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(t).then(done).catch(()=>{fallbackCopia(t);done();});
+  else {fallbackCopia(t);done();}}
+function fallbackCopia(t){const ta=document.createElement("textarea");ta.value=t;ta.style.position="fixed";ta.style.opacity="0";document.body.appendChild(ta);ta.select();try{document.execCommand("copy");}catch(e){}ta.remove();}
 function renderItensConta(){const b=$("#ctItensBox");if(!b)return;
   b.innerHTML=(EDITCONTA.itens||[]).map((it,i)=>`<div class="item-linha">
     <input class="nm" value="${esc(it.desc)}" placeholder="descrição do item" oninput="EDITCONTA.itens[${i}].desc=this.value">
@@ -1509,6 +1589,7 @@ function abrirConta(id){const c=CONTAS.find(x=>x.id===id);if(!c)return;const st=
     <div style="font-size:14px"><b>Forma:</b> ${esc(c.formaPag||'—')}</div>
     ${c.chavePix?`<div style="display:flex;gap:8px;align-items:center;margin-top:6px;background:#f2f8f5;border:1px solid var(--verde-cl);border-radius:8px;padding:9px"><div style="flex:1;font-size:13px;word-break:break-all"><b>PIX:</b><br>${esc(c.chavePix)}</div><button class="btn sm" style="flex:0 0 auto" onclick="copiarConta('${c.id}','pix')">📋 Copiar</button></div>`:''}
     ${c.codigoBoleto?`<div style="display:flex;gap:8px;align-items:center;margin-top:6px;background:#f8fafc;border:1px solid var(--linha);border-radius:8px;padding:9px"><div style="flex:1;font-size:12px;word-break:break-all"><b>Boleto:</b><br>${esc(c.codigoBoleto)}</div><button class="btn sm" style="flex:0 0 auto" onclick="copiarConta('${c.id}','boleto')">📋 Copiar</button></div>`:''}
+    ${c.boletoFoto?`<img src="${c.boletoFoto}" class="comprov-foto" style="margin-top:6px" onclick="verFoto('${c.boletoFoto}')">`:''}
     ${c.especificacoes?`<div class="sec-tit">📄 Especificações</div><p style="font-size:14px">${esc(c.especificacoes)}</p>`:''}
     ${!c.pago?`<button class="btn gh" style="margin-top:14px" onclick="pagarConta('${c.id}');fecharModal()">✔️ Marcar como paga</button>`:''}
     <div class="row" style="margin-top:8px"><button class="btn sec" onclick="editarConta('${c.id}')">✏️ Editar</button>${isAdmin()?`<button class="btn rd" onclick="excluirConta('${c.id}')">🗑️ Excluir</button>`:''}</div>
