@@ -59,6 +59,26 @@ nav button.on{color:var(--lar);border-bottom-color:var(--lar)}
 .kpi .v{font-size:22px;font-weight:800;letter-spacing:-.5px}
 .kpi .l{font-size:11.5px;color:var(--cinza);font-weight:700;text-transform:uppercase;letter-spacing:.3px;margin-top:2px}
 .kpi.g .v{color:var(--verde)} .kpi.r .v{color:var(--vermelho)} .kpi.o .v{color:var(--lar)} .kpi.b .v{color:var(--azul)}
+.painel-eventos{padding-bottom:14px}
+.eventos-head{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0 14px}
+.eventos-num{background:#f8fafc;border:1px solid var(--linha);border-radius:12px;padding:12px}
+.eventos-num .v{font-size:24px;font-weight:900;color:var(--azul);line-height:1}
+.eventos-num .l{font-size:11px;color:var(--cinza);font-weight:800;text-transform:uppercase;margin-top:5px;letter-spacing:.3px}
+.eventos-chart{display:flex;flex-direction:column;gap:11px}
+.ev-row{display:grid;grid-template-columns:minmax(112px,1.1fr) minmax(0,2fr) 42px;gap:9px;align-items:center}
+.ev-name{font-size:12.5px;font-weight:800;min-width:0}
+.ev-name .muted{display:block;font-size:11px;font-weight:700;margin-top:2px}
+.ev-bar{height:14px;background:#edf2f7;border-radius:999px;overflow:hidden;display:flex}
+.ev-fill{height:100%;min-width:3px;background:var(--lar)}
+.ev-fill.and{background:var(--azul)}
+.ev-fill.ok{background:var(--verde)}
+.ev-fill.plan{background:var(--amarelo)}
+.ev-count{text-align:right;font-size:12px;font-weight:900;color:var(--tinta)}
+.eventos-leg{display:flex;flex-wrap:wrap;gap:8px 12px;margin-top:12px;font-size:11.5px;color:var(--cinza);font-weight:800}
+.eventos-leg span{display:inline-flex;align-items:center;gap:5px}
+.eventos-leg i{width:9px;height:9px;border-radius:999px;display:inline-block}
+.financeiro-kpis{margin-bottom:0}
+@media(max-width:520px){.eventos-head{grid-template-columns:1fr}.ev-row{grid-template-columns:1fr}.ev-count{text-align:left}.ev-name .muted{display:inline;margin-left:4px}}
 
 .btn{background:var(--lar);color:#fff;padding:13px 18px;border-radius:11px;font-weight:800;width:100%;box-shadow:0 2px 8px rgba(31,107,76,.3)}
 .btn:active{transform:translateY(1px)}
@@ -224,11 +244,22 @@ nav button.on{color:var(--lar);border-bottom-color:var(--lar)}
   <!-- PAINEL -->
   <div id="tab-painel" class="wrap hide">
     <div class="field" style="margin-bottom:12px"><select id="filtroMes" onchange="render()"></select></div>
-    <div class="kpis">
-      <div class="kpi b"><div class="v" id="kServ">0</div><div class="l">Eventos</div></div>
-      <div class="kpi o"><div class="v" id="kFat">R$ 0</div><div class="l">Faturamento</div></div>
-      <div class="kpi r"><div class="v" id="kCusto">R$ 0</div><div class="l">Custo</div></div>
-      <div class="kpi g"><div class="v" id="kMargem">R$ 0</div><div class="l">Margem</div></div>
+    <div class="card painel-eventos">
+      <h3>Eventos realizados</h3>
+      <div class="eventos-head">
+        <div class="eventos-num"><div class="v" id="kServ">0</div><div class="l">Eventos no periodo</div></div>
+        <div class="eventos-num"><div class="v" id="kEntregues">0</div><div class="l">Entregues</div></div>
+      </div>
+      <div id="eventosGrafico"></div>
+    </div>
+    <div class="card">
+      <h3>Resumo financeiro</h3>
+      <div class="kpis financeiro-kpis">
+        <div class="kpi o"><div class="v" id="kFat">R$ 0</div><div class="l">Faturamento</div></div>
+        <div class="kpi r"><div class="v" id="kCusto">R$ 0</div><div class="l">Custo</div></div>
+        <div class="kpi g"><div class="v" id="kMargem">R$ 0</div><div class="l">Margem</div></div>
+        <div class="kpi b"><div class="v" id="kTicket">R$ 0</div><div class="l">Ticket medio</div></div>
+      </div>
     </div>
     <div class="card"><h3>💰 Por contrato</h3><div id="porContrato"></div></div>
     <div class="card"><h3>🛒 Compras & 📦 Estoque</h3><div id="painelCompras" style="font-size:14px"></div></div>
@@ -548,10 +579,44 @@ function servicosDoMes(){const m=$("#filtroMes")?$("#filtroMes").value:"__all";r
 /* ===================== RENDER ===================== */
 function render(){if(isAdmin())renderPainel();else renderPainelF();renderLista();}
 
+function renderEventosGrafico(lista){
+  const host=$("#eventosGrafico");if(!host)return;
+  const total=lista.length;
+  if(!total){host.innerHTML=`<div class="empty" style="padding:18px 10px">Sem eventos neste periodo.</div>`;return;}
+  const rows=Object.keys(CONTRATOS).map(k=>{
+    const c=CONTRATOS[k];const evs=lista.filter(s=>s.contrato===k);
+    const st={plan:0,and:0,entregue:0};evs.forEach(s=>{const x=s.status||"plan";st[x]=(st[x]||0)+1;});
+    return {k,c,n:evs.length,st};
+  }).filter(r=>r.n>0).sort((a,b)=>b.n-a.n);
+  const max=Math.max(...rows.map(r=>r.n),1);
+  const html=rows.map(r=>{
+    const w=Math.max(4,Math.round(r.n/max*100));
+    const parts=[
+      ["plan",r.st.plan||0,"plan"],
+      ["and",r.st.and||0,"and"],
+      ["entregue",r.st.entregue||0,"ok"]
+    ].filter(p=>p[1]>0).map(p=>`<div class="ev-fill ${p[2]}" style="width:${Math.max(8,p[1]/r.n*100)}%"></div>`).join("");
+    return `<div class="ev-row">
+      <div class="ev-name">${esc(r.c.nome)}<span class="muted">${Math.round(r.n/total*100)}% do periodo</span></div>
+      <div class="ev-bar" title="${r.n} eventos" style="width:${w}%">${parts}</div>
+      <div class="ev-count">${r.n} ev.</div>
+    </div>`;
+  }).join("");
+  const entregues=lista.filter(s=>s.status==="entregue").length;
+  host.innerHTML=`<div class="eventos-chart">${html}</div>
+    <div class="eventos-leg">
+      <span><i style="background:var(--amarelo)"></i>Planejado</span>
+      <span><i style="background:var(--azul)"></i>Em andamento</span>
+      <span><i style="background:var(--verde)"></i>Entregue</span>
+      <span class="muted">${entregues}/${total} finalizados</span>
+    </div>`;
+}
+
 function renderPainel(){
   const lista=servicosDoMes();let fat=0,cus=0;
   lista.forEach(s=>{fat+=faturamento(s);cus+=custoTotal(s);});
-  $("#kServ").textContent=lista.length;$("#kFat").textContent=brlk(fat);$("#kCusto").textContent=brlk(cus);$("#kMargem").textContent=brlk(fat-cus);
+  $("#kServ").textContent=lista.length;$("#kEntregues").textContent=lista.filter(s=>s.status==="entregue").length;$("#kFat").textContent=brlk(fat);$("#kCusto").textContent=brlk(cus);$("#kMargem").textContent=brlk(fat-cus);$("#kTicket").textContent=brlk(lista.length?fat/lista.length:0);
+  renderEventosGrafico(lista);
   const pc={};
   lista.forEach(s=>{const c=s.contrato;pc[c]=pc[c]||{f:0,c:0,n:0};pc[c].f+=faturamento(s);pc[c].c+=custoTotal(s);pc[c].n++;});
   $("#porContrato").innerHTML=Object.keys(CONTRATOS).map(k=>{
