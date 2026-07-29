@@ -262,6 +262,7 @@ nav button.on{color:var(--lar);border-bottom-color:var(--lar)}
       </div>
     </div>
     <div class="card"><h3>💰 Por contrato</h3><div id="porContrato"></div></div>
+    <div class="card"><h3>🧮 Painel de custos</h3><div id="painelCustos" style="font-size:14px"></div></div>
     <div class="card"><h3>🛒 Compras & 📦 Estoque</h3><div id="painelCompras" style="font-size:14px"></div></div>
     <div class="card" onclick="tab('contas')" style="cursor:pointer"><h3>💳 Contas a pagar</h3><div id="painelContas" style="font-size:14px"></div></div>
     <div class="card"><h3>🚗 Logística do mês</h3><div id="painelLog" style="font-size:14px"></div></div>
@@ -440,11 +441,31 @@ function custoLogistica(s){const l=s.logistica||{};return (+l.combustivelValor||
 function custoGastos(s){return (s.gastos||[]).reduce((t,g)=>t+(+g.valor||0),0);}
 function custoComprasAloc(evId){let t=0;COMPRAS.forEach(c=>{(c.aloc||[]).forEach(a=>{if(a.ev===evId){const it=(c.itens||[])[a.it];if(it)t+=(+a.qtd||0)*(+it.valorUnit||0);}});});return t;}
 function comprasDoEvento(evId){const out=[];COMPRAS.forEach(c=>{let v=0,its=[];(c.aloc||[]).forEach(a=>{if(a.ev===evId){const it=(c.itens||[])[a.it];if(it){v+=(+a.qtd||0)*(+it.valorUnit||0);its.push((it.nome||'')+' '+a.qtd+' '+(it.unidade||''));}}});if(v>0)out.push({compra:c,valor:v,its:its});});return out;}
-function custoTotal(s){return custoLogistica(s)+custoGastos(s)+custoComprasAloc(s.id);}
+function contasDoEvento(evId){return CONTAS.filter(c=>c.eventoId===evId&&!c.compraId);}
+function custoContasEvento(evId){return contasDoEvento(evId).reduce((t,c)=>t+(+c.valor||0),0);}
+function custoTotal(s){return custoLogistica(s)+custoGastos(s)+custoComprasAloc(s.id)+custoContasEvento(s.id);}
 function margem(s){return faturamento(s)-custoTotal(s);}
 function kmRodado(s){const l=s.logistica||{};return Math.max(0,(+l.kmFinal||0)-(+l.kmInicial||0));}
 function compraTotal(c){return (c.itens||[]).reduce((t,i)=>t+(+i.valorTotal|| (+i.qtd||0)*(+i.valorUnit||0) ||0),0);}
 function sobraItem(c,it){const item=c.itens[it];const usado=(c.aloc||[]).filter(a=>a.it===it).reduce((t,a)=>t+(+a.qtd||0),0);return Math.max(0,(+item.qtd||0)-usado);}
+function compraAlocada(c){return (c.aloc||[]).reduce((t,a)=>{const it=(c.itens||[])[a.it];return t+(it?(+a.qtd||0)*(+it.valorUnit||0):0);},0);}
+function compraSemVinculo(c){return Math.max(0,compraTotal(c)-compraAlocada(c));}
+function contasSemCompra(lista){return lista.filter(c=>!c.compraId);}
+function eventoResumo(s){return `${s.cliente||'evento'}${s.evento?' · '+s.evento:''}${s.data?' · '+s.data:''}`;}
+function contasLigadasCompra(compraId){return CONTAS.filter(c=>c.compraId===compraId);}
+function sugestoesEventoParaCompra(c){
+  if(c.eventoId||c.empresaGeral||(c.aloc&&c.aloc.length))return [];
+  const txt=norm([(c.fornecedor||''),(c.itens||[]).map(i=>i.nome).join(' ')].join(' '));
+  const data=c.data||'';
+  return SERVICOS.map(s=>{
+    let score=0;
+    if(data&&s.data===data)score+=40;
+    if(data&&s.data&&Math.abs((new Date(data)-new Date(s.data))/86400000)<=2)score+=15;
+    [s.cliente,s.evento,s.local,CONTRATOS[s.contrato]&&CONTRATOS[s.contrato].nome].filter(Boolean).forEach(v=>{if(txt&&norm(v)&&txt.indexOf(norm(v))>=0)score+=25;});
+    if((s.contrato||'')==='evento')score+=5;
+    return {s,score};
+  }).filter(x=>x.score>=25).sort((a,b)=>b.score-a.score).slice(0,3);
+}
 
 /* ---- config local (chave IA / modelo — nunca vai pra nuvem) ---- */
 function salvarConf(){try{localStorage.setItem(K_CONF,JSON.stringify(CONFIG));}catch(e){}}
@@ -648,6 +669,58 @@ function renderPainel(){
     <div style="display:flex;justify-content:space-between;padding:5px 0"><span class="muted">Em aberto (${nAb})</span><b>${brl(av+vc)}</b></div>
     ${vc>0?`<div style="display:flex;justify-content:space-between;padding:5px 0"><span style="color:var(--vermelho)">⚠ Vencido</span><b style="color:var(--vermelho)">${brl(vc)}</b></div>`:''}
     ${prox?`<div style="display:flex;justify-content:space-between;padding:5px 0"><span class="muted">Próxima</span><b>${esc(prox.tipo)} · ${esc(prox.vencimento)}</b></div>`:'<div class="muted" style="padding:5px 0">Nada a pagar 👍</div>'}`;
+}
+function renderPainel(){
+  const lista=servicosDoMes();let fat=0,cus=0;
+  lista.forEach(s=>{fat+=faturamento(s);cus+=custoTotal(s);});
+  const mesSel=$("#filtroMes").value;
+  const comprasPeriodo=mesSel==="__all"?COMPRAS:COMPRAS.filter(c=>(c.data||"").slice(0,7)===mesSel);
+  const contasPeriodo=mesSel==="__all"?CONTAS:CONTAS.filter(c=>((c.vencimento||c.pagoEm||"").slice(0,7)===mesSel));
+  const totalCompras=comprasPeriodo.reduce((t,c)=>t+compraTotal(c),0);
+  const totalComprasAloc=comprasPeriodo.reduce((t,c)=>t+compraAlocada(c),0);
+  const totalComprasSemVinculo=comprasPeriodo.reduce((t,c)=>t+compraSemVinculo(c),0);
+  const totalContasSemCompra=contasSemCompra(contasPeriodo).reduce((t,c)=>t+(+c.valor||0),0);
+  const gastosDiretos=lista.reduce((t,s)=>t+custoGastos(s)+custoLogistica(s)+custoContasEvento(s.id),0);
+  const gastoReal=totalCompras+totalContasSemCompra+gastosDiretos;
+  $("#kServ").textContent=lista.length;$("#kEntregues").textContent=lista.filter(s=>s.status==="entregue").length;$("#kFat").textContent=brlk(fat);$("#kCusto").textContent=brlk(gastoReal);$("#kMargem").textContent=brlk(fat-gastoReal);$("#kTicket").textContent=brlk(lista.length?fat/lista.length:0);
+  renderEventosGrafico(lista);
+  const pc={};
+  lista.forEach(s=>{const c=s.contrato;pc[c]=pc[c]||{f:0,c:0,n:0};pc[c].f+=faturamento(s);pc[c].c+=custoTotal(s);pc[c].n++;});
+  $("#porContrato").innerHTML=Object.keys(CONTRATOS).map(k=>{
+    const d=pc[k]||{f:0,c:0,n:0};const mg=d.f-d.c;const pct=d.f?Math.round(mg/d.f*100):0;
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px dashed var(--linha)">
+      <div><span class="tag ${CONTRATOS[k].tag}">${CONTRATOS[k].nome}</span> <span class="muted" style="font-size:12px">${d.n} ev.</span></div>
+      <div style="text-align:right"><b>${brl(d.f)}</b><div style="font-size:12px" class="muted">margem ${brl(mg)} · ${pct}%</div></div></div>`;
+  }).join("");
+  const semVinculo=comprasPeriodo.filter(c=>compraSemVinculo(c)>0&&!c.empresaGeral&&!c.eventoId);
+  $("#painelCustos").innerHTML=`
+    <div style="display:flex;justify-content:space-between;padding:5px 0"><span class="muted">Gasto real do periodo</span><b>${brl(gastoReal)}</b></div>
+    <div style="display:flex;justify-content:space-between;padding:5px 0"><span class="muted">Compras no periodo</span><b>${brl(totalCompras)}</b></div>
+    <div style="display:flex;justify-content:space-between;padding:5px 0"><span class="muted">Compras ligadas a eventos</span><b style="color:var(--verde)">${brl(totalComprasAloc)}</b></div>
+    <div style="display:flex;justify-content:space-between;padding:5px 0"><span class="muted">Compras/estoque sem evento</span><b style="color:${totalComprasSemVinculo?'var(--amarelo)':'var(--verde)'}">${brl(totalComprasSemVinculo)}</b></div>
+    <div style="display:flex;justify-content:space-between;padding:5px 0"><span class="muted">Contas sem compra vinculada</span><b>${brl(totalContasSemCompra)}</b></div>
+    <div style="display:flex;justify-content:space-between;padding:7px 0;border-top:1px dashed var(--linha);margin-top:4px"><span><b>Lucro estimado</b></span><b style="color:${fat-gastoReal>=0?'var(--verde)':'var(--vermelho)'}">${brl(fat-gastoReal)}</b></div>
+    ${semVinculo.length?`<div class="warn" style="margin-top:8px">⚠ ${semVinculo.length} compra(s) sem evento. Abra Compras para vincular ou desmembrar.</div>`:''}`;
+  const valEst=ESTOQUE.reduce((t,e)=>t+(+e.qtd||0)*(+e.custoUnit||0),0);
+  $("#painelCompras").innerHTML=`
+    <div style="display:flex;justify-content:space-between;padding:5px 0"><span class="muted">Compras (nº)</span><b>${comprasPeriodo.length}</b></div>
+    <div style="display:flex;justify-content:space-between;padding:5px 0"><span class="muted">Total comprado</span><b>${brl(totalCompras)}</b></div>
+    <div style="display:flex;justify-content:space-between;padding:5px 0"><span class="muted">Pendente de vinculo</span><b style="color:${totalComprasSemVinculo?'var(--amarelo)':'var(--verde)'}">${brl(totalComprasSemVinculo)}</b></div>
+    <div style="display:flex;justify-content:space-between;padding:5px 0"><span class="muted">Valor em estoque</span><b>${brl(valEst)}</b></div>`;
+  let km=0,lit=0,comb=0,ped=0;
+  lista.forEach(s=>{km+=kmRodado(s);const l=s.logistica||{};lit+=(+l.combustivelLitros||0);comb+=(+l.combustivelValor||0);ped+=(+l.pedagio||0);});
+  $("#painelLog").innerHTML=`
+    <div style="display:flex;justify-content:space-between;padding:5px 0"><span class="muted">KM rodados</span><b>${km.toLocaleString("pt-BR")} km</b></div>
+    <div style="display:flex;justify-content:space-between;padding:5px 0"><span class="muted">Combustivel</span><b>${lit.toFixed(0)} L · ${brl(comb)}</b></div>
+    <div style="display:flex;justify-content:space-between;padding:5px 0"><span class="muted">Pedagio</span><b>${brl(ped)}</b></div>`;
+  $("#pendencias").innerHTML=pendHTML(lista);
+  let av=0,vc=0,nAb=0;const hj=hoje();
+  CONTAS.forEach(c=>{if(c.pago)return;const v=+c.valor||0;nAb++;if(c.vencimento&&c.vencimento<hj)vc+=v;else av+=v;});
+  const prox=CONTAS.filter(c=>!c.pago&&c.vencimento).sort((a,b)=>a.vencimento.localeCompare(b.vencimento))[0];
+  $("#painelContas").innerHTML=`
+    <div style="display:flex;justify-content:space-between;padding:5px 0"><span class="muted">Em aberto (${nAb})</span><b>${brl(av+vc)}</b></div>
+    ${vc>0?`<div style="display:flex;justify-content:space-between;padding:5px 0"><span style="color:var(--vermelho)">⚠ Vencido</span><b style="color:var(--vermelho)">${brl(vc)}</b></div>`:''}
+    ${prox?`<div style="display:flex;justify-content:space-between;padding:5px 0"><span class="muted">Proxima</span><b>${esc(prox.tipo)} · ${esc(prox.vencimento)}</b></div>`:'<div class="muted" style="padding:5px 0">Nada a pagar</div>'}`;
 }
 function renderPainelF(){
   const lista=SERVICOS.filter(s=>true);
@@ -1158,9 +1231,13 @@ function renderCompras(){const host=$("#listaCompras");if(!host)return;
     const nItens=(c.itens||[]).length;const evs=[...new Set((c.aloc||[]).map(a=>a.ev))].length;
     const sobra=(c.itens||[]).some((_,i)=>sobraItem(c,i)>0);
     const evP=c.eventoId?SERVICOS.find(s=>s.id===c.eventoId):null;
+    const aloc=compraAlocada(c),sem=compraSemVinculo(c),cts=contasLigadasCompra(c.id);
+    const sug=sugestoesEventoParaCompra(c)[0];
     return `<div class="serv" onclick="abrirCompra('${c.id}')">
       <div class="top"><div>
         <div class="nome">${esc(c.fornecedor||"Sem fornecedor")}</div>
+        <div class="meta">Alocado ${brl(aloc)}${sem>0?` · pendente ${brl(sem)}`:''}${cts.length?` · ${cts.length} conta(s) ligada(s)`:''}</div>
+        ${sug?`<div class="meta" style="color:var(--azul);font-weight:700">🤖 sugestao: ${esc(eventoResumo(sug.s))}</div>`:''}
         <div class="meta">${esc(c.data||"")} · ${nItens} itens ${!evP&&evs>1?`· ${evs} eventos`:""}</div>
         ${evP?`<div class="meta" style="color:var(--lar);font-weight:700">🎯 ${esc(evP.cliente||'evento')}${evP.evento?' · '+esc(evP.evento):''}</div>`:(c.empresaGeral?`<div class="meta" style="color:var(--verde);font-weight:700">🏢 ${esc(CONTRATOS[c.empresaGeral]?CONTRATOS[c.empresaGeral].nome:c.empresaGeral)} (geral)</div>`:(c.aloc&&c.aloc.length?'':'<div class="meta" style="color:var(--amarelo);font-weight:700">⚠ sem evento — não entra no custo</div>'))}
       </div><div style="text-align:right"><b>${brl(compraTotal(c))}</b>${c.comprovanteFoto?'<div style="font-size:11px;color:var(--verde);font-weight:700">✅ comprovante</div>':'<div style="font-size:11px;color:var(--vermelho);font-weight:700">⚠ sem comprovante</div>'}</div></div>
@@ -1238,9 +1315,11 @@ function salvarCompra(){
 function abrirCompra(id){const c=COMPRAS.find(x=>x.id===id);if(!c)return;const admin=isAdmin();const podeDesm=admin||podeVer('cmv');
   const itens=(c.itens||[]).map((it,i)=>`<tr><td>${esc(it.nome)}</td><td>${it.qtd} ${esc(it.unidade||'')}</td><td>${brl(it.valorUnit)}</td><td style="text-align:right"><b>${brl((+it.qtd||0)*(+it.valorUnit||0))}</b></td></tr>`).join("");
   const evP=c.eventoId?SERVICOS.find(s=>s.id===c.eventoId):null;
+  const sugestoes=sugestoesEventoParaCompra(c);
   modal(`<h2 style="margin-bottom:2px">${esc(c.fornecedor||"—")}</h2>
     <p class="muted">${esc(c.data||"")} · ${brl(compraTotal(c))} · por ${esc(c.criadoPor||"")}</p>
     ${evP?`<div class="info" style="cursor:pointer" onclick="abrirDetalhe('${evP.id}')">🎯 <b>Vinculada ao evento:</b> ${esc(evP.cliente||'evento')}${evP.evento?' · '+esc(evP.evento):''} · ${esc(evP.data||'')} ›</div>`:(c.empresaGeral?`<div class="info">🏢 <b>Empresa:</b> ${esc(CONTRATOS[c.empresaGeral]?CONTRATOS[c.empresaGeral].nome:c.empresaGeral)} (geral — sem evento específico)</div>`:'')}
+    ${sugestoes.length?`<div class="info"><b>🤖 Sugestao de vinculo:</b><br>${sugestoes.map(x=>`<button class="btn sm sec" style="margin:6px 6px 0 0;width:auto" onclick="aplicarSugestaoCompra('${c.id}','${x.s.id}')">${esc(eventoResumo(x.s))}</button>`).join('')}</div>`:''}
     ${c.comprovanteFoto?`<img src="${c.comprovanteFoto}" class="comprov-foto" onclick="verFoto('${c.comprovanteFoto}')">`:'<div class="warn">Sem comprovante.</div>'}
     <div class="sec-tit">📝 Itens</div>
     <table class="tabela"><tr><th>Item</th><th>Qtd</th><th>R$/un</th><th style="text-align:right">Total</th></tr>${itens}</table>
@@ -1250,6 +1329,10 @@ function abrirCompra(id){const c=COMPRAS.find(x=>x.id===id);if(!c)return;const a
       ${admin?`<button class="btn rd" onclick="excluirCompra('${c.id}')">🗑️ Excluir</button>`:""}
     </div>
     <button class="btn sec" style="margin-top:8px" onclick="fecharModal()">Fechar</button>`);}
+function aplicarSugestaoCompra(cid,evId){const c=COMPRAS.find(x=>x.id===cid);if(!c)return;
+  c.eventoId=evId;c.empresaGeral="";
+  c.aloc=(c.itens||[]).map((it,i)=>({ev:evId,it:i,qtd:+it.qtd||0}));
+  cloudSet(COL.comp,c);abrirCompra(cid);renderCompras();if(isAdmin())render();}
 function blocoDesmembrar(c){
   const eventos=[...SERVICOS].sort((a,b)=>(b.data||"").localeCompare(a.data||"")).slice(0,40);
   const temSobra=(c.itens||[]).some((_,i)=>sobraItem(c,i)>0);
@@ -1584,18 +1667,28 @@ function renderContas(){const host=$("#listaContas");if(!host)return;
     const chip={aberto:['A vencer','plan'],vencido:['Vencido','plan'],pago:['Pago','ok']}[st];
     const cor=st==='vencido'?'var(--vermelho)':st==='pago'?'var(--verde)':'var(--tinta)';
     const dias=c.vencimento&&!c.pago?diasPara(c.vencimento):null;
+    const ev=c.eventoId?SERVICOS.find(s=>s.id===c.eventoId):null;
+    const vinc=ev?`🎯 ${esc(eventoResumo(ev))}`:(c.empresaGeral?`🏢 ${esc(CONTRATOS[c.empresaGeral]?CONTRATOS[c.empresaGeral].nome:c.empresaGeral)} (geral)`:(c.compraId?'🛒 compra vinculada':''));
     return `<div class="serv" onclick="abrirConta('${c.id}')">
       <div class="top"><div>
         <div class="nome">${esc(c.tipo||'Conta')}</div>
         <div class="meta">${esc(c.fornecedor||'')}</div>
+        ${vinc?`<div class="meta" style="color:var(--verde);font-weight:700">${vinc}</div>`:''}
         <div class="meta">${c.vencimento?'📅 vence '+esc(c.vencimento):'sem vencimento'} ${dias!=null?`<b style="color:${dias<0?'var(--vermelho)':dias<=3?'var(--amarelo)':'var(--cinza)'}">${dias<0?`(${-dias}d atrasado)`:dias===0?'(hoje!)':`(em ${dias}d)`}</b>`:''}</div>
       </div><div style="text-align:right"><b style="font-size:16px;color:${cor}">${brl(c.valor)}</b><div><span class="chip ${chip[1]}" style="background:${st==='vencido'?'var(--verm-claro)':''};color:${st==='vencido'?'var(--vermelho)':''}">${chip[0]}</span></div></div></div>
       ${!c.pago?`<button class="btn gh sm" style="width:100%;margin-top:8px" onclick="event.stopPropagation();pagarConta('${c.id}')">✔️ Marcar como paga</button>`:`<div class="meta" style="margin-top:6px;color:var(--verde)">✅ paga em ${esc(c.pagoEm||'')}</div>`}
     </div>`;}).join("");
 }
 function diasPara(d){const a=new Date(hoje()+"T00:00:00"),b=new Date(d+"T00:00:00");return Math.round((b-a)/86400000);}
-function novaConta(){EDITCONTA={id:uid(),criadoEm:Date.now(),criadoPor:USER.nome,tipo:TIPOS_SERVICO[0],fornecedor:"",motivo:"",compraId:"",itens:[],especificacoes:"",valor:"",vencimento:hoje(),formaPag:"PIX",chavePix:"",codigoBoleto:"",boletoFoto:null,boletoNome:"",pago:false,pagoEm:""};formConta();}
+function novaConta(){EDITCONTA={id:uid(),criadoEm:Date.now(),criadoPor:USER.nome,tipo:TIPOS_SERVICO[0],fornecedor:"",motivo:"",compraId:"",eventoId:"",empresaGeral:"",itens:[],especificacoes:"",valor:"",vencimento:hoje(),formaPag:"PIX",chavePix:"",codigoBoleto:"",boletoFoto:null,boletoNome:"",pago:false,pagoEm:""};formConta();}
 function editarConta(id){EDITCONTA=JSON.parse(JSON.stringify(CONTAS.find(c=>c.id===id)));fecharModal();formConta();}
+function optgroupsEventosConta(c){
+  return Object.keys(CONTRATOS).map(k=>{
+    const evs=[...SERVICOS].filter(s=>(s.contrato||'evento')===k).sort((a,b)=>(b.data||'').localeCompare(a.data||'')).slice(0,60);
+    const evOpt=evs.map(s=>`<option value="ev:${s.id}" ${c.eventoId===s.id?'selected':''}>${esc(eventoResumo(s))}</option>`).join('');
+    return `<optgroup label="${k==='evento'?'VR · Eventos avulsos':esc(CONTRATOS[k].nome)}">${evOpt}</optgroup>`;
+  }).join('');
+}
 function formConta(){const c=EDITCONTA;
   const comprasOpt=[...COMPRAS].sort((a,b)=>(b.data||'').localeCompare(a.data||'')).slice(0,60);
   modal(`<h2 style="margin-bottom:12px">${CONTAS.find(x=>x.id===c.id)?"✏️ Editar conta":"💳 Nova conta a pagar"}</h2>
@@ -1604,6 +1697,9 @@ function formConta(){const c=EDITCONTA;
     <div class="field"><label>Motivo do pagamento</label><input id="ctMotivo" value="${esc(c.motivo||'')}" placeholder="Ex: compra de carnes p/ evento X, diária de garçom..."></div>
     <div class="field"><label>Vincular a uma compra <span class="muted" style="text-transform:none">(opcional — puxa itens e valor)</span></label>
       <select id="ctCompra" onchange="vincularCompraConta(this.value)"><option value="">— nenhuma —</option>${comprasOpt.map(cp=>`<option value="${cp.id}" ${c.compraId===cp.id?'selected':''}>${esc(cp.fornecedor||'compra')} · ${esc(cp.data||'')} · ${brl(compraTotal(cp))}</option>`).join('')}</select></div>
+    <div class="field"><label>Evento / empresa para ratear <span class="muted" style="text-transform:none">(opcional)</span></label>
+      <select id="ctEvento"><option value="">— sem vinculo direto —</option>
+        <optgroup label="Empresa geral">${Object.keys(CONTRATOS).map(k=>`<option value="emp:${k}" ${c.empresaGeral===k?'selected':''}>${k==='evento'?'VR · Eventos avulsos':esc(CONTRATOS[k].nome)} (geral)</option>`).join('')}</optgroup>${optgroupsEventosConta(c)}</select></div>
     <div class="sec-tit">📝 Itens / o que está pagando</div>
     <div id="ctItensBox"></div>
     <button class="btn sec sm" style="width:100%" onclick="addItemConta()">+ Item</button>
@@ -1644,11 +1740,15 @@ function addItemConta(){coletarConta();EDITCONTA.itens.push({desc:"",valor:""});
 function coletarConta(){if(!$("#ctTipo"))return;const c=EDITCONTA;
   c.tipo=$("#ctTipo").value;c.fornecedor=$("#ctForn").value.trim();c.motivo=$("#ctMotivo").value.trim();
   c.especificacoes=$("#ctEspec").value.trim();c.valor=$("#ctValor").value;c.vencimento=$("#ctVenc").value;
-  c.formaPag=$("#ctForma").value;c.chavePix=$("#ctPix").value.trim();c.codigoBoleto=$("#ctBoleto").value.trim();}
+  c.formaPag=$("#ctForma").value;c.chavePix=$("#ctPix").value.trim();c.codigoBoleto=$("#ctBoleto").value.trim();
+  const ve=$("#ctEvento")?$("#ctEvento").value:"";
+  if(ve.indexOf("ev:")===0){c.eventoId=ve.slice(3);c.empresaGeral="";}
+  else if(ve.indexOf("emp:")===0){c.empresaGeral=ve.slice(4);c.eventoId="";}
+  else {c.eventoId="";c.empresaGeral="";}}
 function vincularCompraConta(cid){coletarConta();const c=EDITCONTA;c.compraId=cid;
   if(cid){const cp=COMPRAS.find(x=>x.id===cid);if(cp){c.fornecedor=cp.fornecedor||c.fornecedor;c.valor=compraTotal(cp);
     c.itens=(cp.itens||[]).map(i=>({desc:(i.nome||'')+(i.qtd?` (${i.qtd} ${i.unidade||''})`:''),valor:(+i.qtd||0)*(+i.valorUnit||0)}));
-    if(!c.motivo)c.motivo="Pagamento da compra em "+(cp.data||'');}}
+    if(!c.motivo)c.motivo="Pagamento da compra em "+(cp.data||'');c.eventoId="";c.empresaGeral="";}}
   formConta();}
 function salvarConta(){coletarConta();const c=EDITCONTA;
   const pago=$("#ctPago").classList.contains("on");
@@ -1661,7 +1761,7 @@ function copiarConta(id,campo){const c=CONTAS.find(x=>x.id===id);if(!c)return;co
   const ok=()=>alert('Copiado ✅');
   if(navigator.clipboard)navigator.clipboard.writeText(t).then(ok,()=>{});
   else{try{const ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();ok();}catch(e){}}}
-function abrirConta(id){const c=CONTAS.find(x=>x.id===id);if(!c)return;const st=statusConta(c);const cp=c.compraId?COMPRAS.find(x=>x.id===c.compraId):null;
+function abrirConta(id){const c=CONTAS.find(x=>x.id===id);if(!c)return;const st=statusConta(c);const cp=c.compraId?COMPRAS.find(x=>x.id===c.compraId):null;const ev=c.eventoId?SERVICOS.find(s=>s.id===c.eventoId):null;
   modal(`<h2 style="margin-bottom:2px">${esc(c.tipo||'Conta')}</h2>
     <p class="muted">${esc(c.fornecedor||'')}${c.criadoPor?' · lançado por '+esc(c.criadoPor):''}</p>
     <div class="resumo"><div class="li"><span>Valor</span><b>${brl(c.valor)}</b></div>
@@ -1669,6 +1769,7 @@ function abrirConta(id){const c=CONTAS.find(x=>x.id===id);if(!c)return;const st=
       <div class="li"><span>Situação</span><b class="${c.pago?'pos':st==='vencido'?'neg':''}">${c.pago?'Paga em '+esc(c.pagoEm):st==='vencido'?'VENCIDA':'Em aberto'}</b></div></div>
     ${c.motivo?`<div class="sec-tit">🎯 Motivo</div><p style="font-size:14px">${esc(c.motivo)}</p>`:''}
     ${cp?`<div class="sec-tit">🛒 Compra vinculada</div><p style="font-size:13.5px" onclick="abrirCompra('${cp.id}')"><a style="color:var(--lar);font-weight:700">${esc(cp.fornecedor||'compra')} · ${esc(cp.data||'')} · ${brl(compraTotal(cp))} ›</a></p>`:''}
+    ${ev?`<div class="sec-tit">🎯 Evento vinculado</div><p style="font-size:13.5px" onclick="abrirDetalhe('${ev.id}')"><a style="color:var(--lar);font-weight:700">${esc(eventoResumo(ev))} ›</a></p>`:(c.empresaGeral?`<div class="sec-tit">🏢 Empresa vinculada</div><p style="font-size:13.5px">${esc(CONTRATOS[c.empresaGeral]?CONTRATOS[c.empresaGeral].nome:c.empresaGeral)} (geral)</p>`:'')}
     ${(c.itens&&c.itens.length)?`<div class="sec-tit">📝 Itens</div>${c.itens.map(i=>`<div style="display:flex;justify-content:space-between;font-size:13.5px;padding:3px 0;border-bottom:1px dashed var(--linha)"><span>${esc(i.desc)}</span><b>${brl(i.valor)}</b></div>`).join('')}`:''}
     <div class="sec-tit">💳 Pagamento</div>
     <div style="font-size:14px"><b>Forma:</b> ${esc(c.formaPag||'—')}</div>
