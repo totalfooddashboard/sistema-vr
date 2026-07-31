@@ -314,7 +314,8 @@ nav button.on{color:var(--lar);border-bottom-color:var(--lar)}
       <div class="kpi" style="border-color:#fca5a5"><div class="v" id="cVencido" style="font-size:17px;color:#b91c1c">R$ 0</div><div class="l">Vencido</div></div>
       <div class="kpi g"><div class="v" id="cPago" style="font-size:17px">R$ 0</div><div class="l">Pago no mês</div></div>
     </div>
-    <button class="btn" style="margin-bottom:14px" onclick="novaConta()">💳 Nova conta a pagar</button>
+    <button class="btn" style="margin-bottom:8px" onclick="novaConta()">💳 Nova conta a pagar</button>
+    <button class="btn sec" style="margin-bottom:14px" onclick="exportarContasExcel()">⬇️ Baixar Excel para pagamento</button>
     <div class="pill-select" style="margin-bottom:14px">
       <button data-fc="aberto" class="on" onclick="filtroConta(this,'aberto')">Em aberto</button>
       <button data-fc="pago" onclick="filtroConta(this,'pago')">Pagas</button>
@@ -1649,6 +1650,30 @@ function detalhePreco(key){const pts=[];
 /* ===================== CONTAS A PAGAR ===================== */
 function statusConta(c){if(c.pago)return"pago";const hj=hoje();if(c.vencimento&&c.vencimento<hj)return"vencido";return"aberto";}
 function filtroConta(btn,f){document.querySelectorAll('[data-fc]').forEach(b=>b.classList.remove("on"));btn.classList.add("on");FILTRO_CONTA=f;renderContas();}
+function contasFiltradasExport(){
+  let lista=[...CONTAS];
+  if(FILTRO_CONTA==="aberto")lista=lista.filter(c=>!c.pago);
+  else if(FILTRO_CONTA==="pago")lista=lista.filter(c=>c.pago);
+  return lista.sort((a,b)=>{if(a.pago!==b.pago)return a.pago?1:-1;return (a.vencimento||"9999").localeCompare(b.vencimento||"9999");});
+}
+function exportarContasExcel(){
+  const lista=contasFiltradasExport();
+  if(!lista.length){alert("Não há contas para exportar neste filtro.");return;}
+  const linhas=lista.map(c=>{
+    const nome=c.fornecedor||c.tipo||"";
+    const dataPag=c.pago?(c.pagoEm||""):(c.vencimento||"");
+    return `<tr><td>${esc(nome)}</td><td>${Number(c.valor||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}</td><td>${esc(dataPag)}</td><td>${esc(c.chavePix||"")}</td></tr>`;
+  }).join("");
+  const titulo=FILTRO_CONTA==="pago"?"Contas pagas":FILTRO_CONTA==="todos"?"Todas as contas":"Contas em aberto";
+  const html=`<!doctype html><html><head><meta charset="utf-8"></head><body>
+    <table border="1"><thead><tr><th colspan="4">${esc(titulo)} - ${esc(hoje())}</th></tr>
+    <tr><th>Nome</th><th>Valor</th><th>Data de pagamento</th><th>PIX</th></tr></thead><tbody>${linhas}</tbody></table>
+    </body></html>`;
+  const blob=new Blob(["\ufeff"+html],{type:"application/vnd.ms-excel;charset=utf-8"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);
+  a.download="contas-a-pagar-"+(FILTRO_CONTA||"aberto")+"-"+hoje()+".xls";a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+}
 function renderContas(){const host=$("#listaContas");if(!host)return;
   const hj=hoje();const mesAtual=hj.slice(0,7);
   let aVencer=0,vencido=0,pagoMes=0;
