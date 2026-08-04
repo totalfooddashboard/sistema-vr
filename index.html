@@ -324,6 +324,24 @@ nav button.on{color:var(--lar);border-bottom-color:var(--lar)}
     <div id="listaContas"></div>
   </div>
 
+  <!-- CONTAS CASA -->
+  <div id="tab-contas-casa" class="wrap hide">
+    <div class="info">Contas da casa. Acesso restrito para Keila e administrador geral.</div>
+    <div class="kpis" style="grid-template-columns:repeat(3,1fr);margin-bottom:14px">
+      <div class="kpi r"><div class="v" id="ccAvencer" style="font-size:17px">R$ 0</div><div class="l">A vencer</div></div>
+      <div class="kpi" style="border-color:#fca5a5"><div class="v" id="ccVencido" style="font-size:17px;color:#b91c1c">R$ 0</div><div class="l">Vencido</div></div>
+      <div class="kpi g"><div class="v" id="ccPago" style="font-size:17px">R$ 0</div><div class="l">Pago no mês</div></div>
+    </div>
+    <button class="btn" style="margin-bottom:8px" onclick="novaContaCasa()">🏠 Nova conta casa</button>
+    <button class="btn sec" style="margin-bottom:14px" onclick="exportarContasCasaExcel()">⬇️ Baixar Excel para pagamento</button>
+    <div class="pill-select" style="margin-bottom:14px">
+      <button data-fcc="aberto" class="on" onclick="filtroContaCasa(this,'aberto')">Em aberto</button>
+      <button data-fcc="pago" onclick="filtroContaCasa(this,'pago')">Pagas</button>
+      <button data-fcc="todos" onclick="filtroContaCasa(this,'todos')">Todas</button>
+    </div>
+    <div id="listaContasCasa"></div>
+  </div>
+
   <!-- CMV -->
   <div id="tab-cmv" class="wrap hide">
     <div class="field" style="margin-bottom:10px"><select id="filtroMesCMV" onchange="renderCMV()"></select></div>
@@ -372,16 +390,22 @@ catch(e){ console.warn("Firebase falhou:",e); }
 <script>
 /* ===================== SISTEMA VR ===================== */
 const K_CONF="vr_config_v1"; // só config local (chave IA/modelo) — dados ficam na nuvem
-const COL={ev:"vr_eventos", comp:"vr_compras", cont:"vr_contas", est:"vr_estoque", user:"vr_usuarios", rec:"vr_recibos"};
-let SERVICOS=[], COMPRAS=[], ESTOQUE=[], CONFIG=null, USER=null, FUNCIONARIOS=[], CONTAS=[], RECIBOS=[];
+const COL={ev:"vr_eventos", comp:"vr_compras", cont:"vr_contas", contCasa:"vr_contas_casa", est:"vr_estoque", user:"vr_usuarios", rec:"vr_recibos"};
+let SERVICOS=[], COMPRAS=[], ESTOQUE=[], CONFIG=null, USER=null, FUNCIONARIOS=[], CONTAS=[], CONTAS_CASA=[], RECIBOS=[];
 const EMPRESA={nome:"Vr Refeições",cnpj:"27.731.980/0001-59",email:"marcelo@vrrefeicoes.com.br",tel:"(85) 8833-9998",end:"Rua Nossa Senhora da Glória, 1295, Barroso, Fortaleza-CE, 60862-585",pix:"27731980000159"};
 let SUBS=[]; // unsubscribes das escutas em tempo real
-let FILTRO_CONTRATO="todos", EDIT=null, EDITC=null, FOTO_ALVO=null, FOTO_ORIGEM="camera", FILTRO_CONTA="aberto", EDITCONTA=null, EDITREC=null, EDITNOTA=null;
+let FILTRO_CONTRATO="todos", EDIT=null, EDITC=null, FOTO_ALVO=null, FOTO_ORIGEM="camera", FILTRO_CONTA="aberto", FILTRO_CONTA_CASA="aberto", EDITCONTA=null, EDITCONTA_CASA=null, EDITREC=null, EDITNOTA=null;
 const TIPOS_SERVICO=["Fornecedor / insumos","Freelancer / mão de obra","Aluguel","Energia / água","Combustível","Manutenção veículo","Equipamento / locação","Imposto / taxa","Telefone / internet","Contador","Outros"];
 const FORMAS_PAG=["PIX","Boleto","Transferência","Dinheiro","Cartão","Débito automático","Outro"];
 const PERM_MAP={contas:"permContas",recibos:"permRecibos",cmv:"permCmv",precos:"permPrecos"};
 function podeVer(tab){if(isAdmin())return true;if(!USER)return false;if(tab==="estoque"||tab==="eventos"||tab==="compras"||tab==="painelf")return true;
   return !!USER[PERM_MAP[tab]];}
+function podeContasCasa(){
+  if(isAdmin())return true;
+  if(!USER)return false;
+  const alvo=norm((USER.nome||"")+" "+(USER.email||""));
+  return !!USER.permContasCasa||alvo.indexOf("keila")>=0;
+}
 const podeGerEstoque=()=>isAdmin()||(USER&&USER.permEstoque===true);
 // Cardápio do evento avulso: TODO mundo que loga monta o pedido — igual à grade do
 // Arcelormittal/ARCO, que já é aberta pra equipe. Não depende de permissão marcada.
@@ -490,6 +514,7 @@ function iniciarEscutas(){
   escutar(COL.ev, a=>SERVICOS=a);
   escutar(COL.comp, a=>COMPRAS=a);
   escutar(COL.cont, a=>CONTAS=a);
+  if(podeContasCasa())escutar(COL.contCasa, a=>CONTAS_CASA=a);
   escutar(COL.est, a=>ESTOQUE=a);
   if(isAdmin())escutar(COL.user, a=>FUNCIONARIOS=a.filter(u=>u.role==="func"));
   if(podeVer("recibos"))escutar(COL.rec, a=>RECIBOS=a);
@@ -554,9 +579,10 @@ function iniciar(){
 
 function montarNav(){
   let abas;
-  if(isAdmin()) abas=[["painel","📊 Painel"],["eventos","📋 Eventos"],["compras","🛒 Compras"],["contas","💳 Contas"],["recibos","🧾 Recibos"],["cmv","🧮 CMV"],["estoque","📦 Estoque"],["precos","💲 Preços"]];
+  if(isAdmin()) abas=[["painel","📊 Painel"],["eventos","📋 Eventos"],["compras","🛒 Compras"],["contas","💳 Contas"],["contas-casa","🏠 Contas Casa"],["recibos","🧾 Recibos"],["cmv","🧮 CMV"],["estoque","📦 Estoque"],["precos","💲 Preços"]];
   else{ abas=[["painelf","🏠 Início"],["eventos","📋 Eventos"],["compras","🛒 Compras"]];
     if(podeVer("contas"))abas.push(["contas","💳 Contas"]);
+    if(podeContasCasa())abas.push(["contas-casa","🏠 Contas Casa"]);
     if(podeVer("recibos"))abas.push(["recibos","🧾 Recibos"]);
     if(podeVer("cmv"))abas.push(["cmv","🧮 CMV"]);
     abas.push(["estoque","📦 Estoque"]);
@@ -565,9 +591,10 @@ function montarNav(){
 }
 
 /* ===================== NAV ===================== */
-const TABS=["painel","painelf","eventos","compras","contas","recibos","cmv","estoque","precos","novo","config"];
+const TABS=["painel","painelf","eventos","compras","contas","contas-casa","recibos","cmv","estoque","precos","novo","config"];
 function tab(t){
   if((t==="config"||t==="painel")&&!isAdmin())t="eventos";
+  if(t==="contas-casa"&&!podeContasCasa())t="eventos";
   if((t==="contas"||t==="recibos"||t==="cmv"||t==="precos")&&!podeVer(t))t="eventos";
   CURRENT_TAB=t;
   document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("on",b.dataset.tab===t));
@@ -576,6 +603,7 @@ function tab(t){
   if(t==="novo"&&!EDIT)novoServico();
   if(t==="compras")renderCompras();
   if(t==="contas")renderContas();
+  if(t==="contas-casa")renderContasCasa();
   if(t==="recibos")renderRecibos();
   if(t==="cmv")renderCMV();
   if(t==="estoque")renderEstoque();
@@ -1648,12 +1676,21 @@ function detalhePreco(key){const pts=[];
     `</table><button class="btn sec" style="margin-top:12px" onclick="fecharModal()">Fechar</button>`);}
 
 /* ===================== CONTAS A PAGAR ===================== */
+function contaCasaAtiva(){return CURRENT_TAB==="contas-casa";}
+function contasAtivas(){return contaCasaAtiva()?CONTAS_CASA:CONTAS;}
+function contaEditAtiva(){return contaCasaAtiva()?EDITCONTA_CASA:EDITCONTA;}
+function setContaEdit(c){if(contaCasaAtiva())EDITCONTA_CASA=c;else EDITCONTA=c;}
+function contaColAtiva(){return contaCasaAtiva()?COL.contCasa:COL.cont;}
+function contaFiltroAtivo(){return contaCasaAtiva()?FILTRO_CONTA_CASA:FILTRO_CONTA;}
+function contaTituloAtivo(){return contaCasaAtiva()?"conta casa":"conta";}
 function statusConta(c){if(c.pago)return"pago";const hj=hoje();if(c.vencimento&&c.vencimento<hj)return"vencido";return"aberto";}
 function filtroConta(btn,f){document.querySelectorAll('[data-fc]').forEach(b=>b.classList.remove("on"));btn.classList.add("on");FILTRO_CONTA=f;renderContas();}
+function filtroContaCasa(btn,f){document.querySelectorAll('[data-fcc]').forEach(b=>b.classList.remove("on"));btn.classList.add("on");FILTRO_CONTA_CASA=f;renderContasCasa();}
 function contasFiltradasExport(){
-  let lista=[...CONTAS];
-  if(FILTRO_CONTA==="aberto")lista=lista.filter(c=>!c.pago);
-  else if(FILTRO_CONTA==="pago")lista=lista.filter(c=>c.pago);
+  const filtro=contaFiltroAtivo();
+  let lista=[...contasAtivas()];
+  if(filtro==="aberto")lista=lista.filter(c=>!c.pago);
+  else if(filtro==="pago")lista=lista.filter(c=>c.pago);
   return lista.sort((a,b)=>{if(a.pago!==b.pago)return a.pago?1:-1;return (a.vencimento||"9999").localeCompare(b.vencimento||"9999");});
 }
 function exportarContasExcel(){
@@ -1664,16 +1701,18 @@ function exportarContasExcel(){
     const dataPag=c.pago?(c.pagoEm||""):(c.vencimento||"");
     return `<tr><td>${esc(nome)}</td><td>${Number(c.valor||0).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}</td><td>${esc(dataPag)}</td><td>${esc(c.chavePix||"")}</td></tr>`;
   }).join("");
-  const titulo=FILTRO_CONTA==="pago"?"Contas pagas":FILTRO_CONTA==="todos"?"Todas as contas":"Contas em aberto";
+  const filtro=contaFiltroAtivo();
+  const titulo=filtro==="pago"?"Contas pagas":filtro==="todos"?"Todas as contas":"Contas em aberto";
   const html=`<!doctype html><html><head><meta charset="utf-8"></head><body>
     <table border="1"><thead><tr><th colspan="4">${esc(titulo)} - ${esc(hoje())}</th></tr>
     <tr><th>Nome</th><th>Valor</th><th>Data de pagamento</th><th>PIX</th></tr></thead><tbody>${linhas}</tbody></table>
     </body></html>`;
   const blob=new Blob(["\ufeff"+html],{type:"application/vnd.ms-excel;charset=utf-8"});
   const a=document.createElement("a");a.href=URL.createObjectURL(blob);
-  a.download="contas-a-pagar-"+(FILTRO_CONTA||"aberto")+"-"+hoje()+".xls";a.click();
+  a.download=(contaCasaAtiva()?"contas-casa-":"contas-a-pagar-")+(filtro||"aberto")+"-"+hoje()+".xls";a.click();
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 }
+function exportarContasCasaExcel(){exportarContasExcel();}
 function renderContas(){const host=$("#listaContas");if(!host)return;
   const hj=hoje();const mesAtual=hj.slice(0,7);
   let aVencer=0,vencido=0,pagoMes=0;
@@ -1704,9 +1743,38 @@ function renderContas(){const host=$("#listaContas");if(!host)return;
       ${!c.pago?`<button class="btn gh sm" style="width:100%;margin-top:8px" onclick="event.stopPropagation();pagarConta('${c.id}')">✔️ Marcar como paga</button>`:`<div class="meta" style="margin-top:6px;color:var(--verde)">✅ paga em ${esc(c.pagoEm||'')}</div>`}
     </div>`;}).join("");
 }
+function renderContasCasa(){const host=$("#listaContasCasa");if(!host)return;
+  const hj=hoje();const mesAtual=hj.slice(0,7);
+  let aVencer=0,vencido=0,pagoMes=0;
+  CONTAS_CASA.forEach(c=>{const st=statusConta(c);const v=+c.valor||0;
+    if(st==="aberto")aVencer+=v;else if(st==="vencido")vencido+=v;
+    if(c.pago&&(c.pagoEm||"").slice(0,7)===mesAtual)pagoMes+=v;});
+  $("#ccAvencer")&&($("#ccAvencer").textContent=brlk(aVencer));
+  $("#ccVencido")&&($("#ccVencido").textContent=brlk(vencido));
+  $("#ccPago")&&($("#ccPago").textContent=brlk(pagoMes));
+  let lista=[...CONTAS_CASA];
+  if(FILTRO_CONTA_CASA==="aberto")lista=lista.filter(c=>!c.pago);
+  else if(FILTRO_CONTA_CASA==="pago")lista=lista.filter(c=>c.pago);
+  lista.sort((a,b)=>{if(a.pago!==b.pago)return a.pago?1:-1;return (a.vencimento||"9999").localeCompare(b.vencimento||"9999");});
+  if(!lista.length){host.innerHTML=`<div class="empty"><div class="ic">🏠</div>Nenhuma conta casa ${FILTRO_CONTA_CASA==='pago'?'paga':FILTRO_CONTA_CASA==='aberto'?'em aberto':''}.</div>`;return;}
+  host.innerHTML=lista.map(c=>{const st=statusConta(c);
+    const chip={aberto:['A vencer','plan'],vencido:['Vencido','plan'],pago:['Pago','ok']}[st];
+    const cor=st==='vencido'?'var(--vermelho)':st==='pago'?'var(--verde)':'var(--tinta)';
+    const dias=c.vencimento&&!c.pago?diasPara(c.vencimento):null;
+    return `<div class="serv" onclick="abrirContaCasa('${c.id}')">
+      <div class="top"><div>
+        <div class="nome">${esc(c.tipo||'Conta casa')}</div>
+        <div class="meta">${esc(c.fornecedor||'')}</div>
+        <div class="meta">${c.vencimento?'📅 vence '+esc(c.vencimento):'sem vencimento'} ${dias!=null?`<b style="color:${dias<0?'var(--vermelho)':dias<=3?'var(--amarelo)':'var(--cinza)'}">${dias<0?`(${-dias}d atrasado)`:dias===0?'(hoje!)':`(em ${dias}d)`}</b>`:''}</div>
+      </div><div style="text-align:right"><b style="font-size:16px;color:${cor}">${brl(c.valor)}</b><div><span class="chip ${chip[1]}" style="background:${st==='vencido'?'var(--verm-claro)':''};color:${st==='vencido'?'var(--vermelho)':''}">${chip[0]}</span></div></div></div>
+      ${!c.pago?`<button class="btn gh sm" style="width:100%;margin-top:8px" onclick="event.stopPropagation();pagarContaCasa('${c.id}')">✔️ Marcar como paga</button>`:`<div class="meta" style="margin-top:6px;color:var(--verde)">✅ paga em ${esc(c.pagoEm||'')}</div>`}
+    </div>`;}).join("");
+}
 function diasPara(d){const a=new Date(hoje()+"T00:00:00"),b=new Date(d+"T00:00:00");return Math.round((b-a)/86400000);}
 function novaConta(){EDITCONTA={id:uid(),criadoEm:Date.now(),criadoPor:USER.nome,tipo:TIPOS_SERVICO[0],fornecedor:"",motivo:"",compraId:"",eventoId:"",empresaGeral:"",itens:[],especificacoes:"",valor:"",vencimento:hoje(),formaPag:"PIX",chavePix:"",codigoBoleto:"",boletoFoto:null,boletoNome:"",pago:false,pagoEm:""};formConta();}
+function novaContaCasa(){EDITCONTA_CASA={id:uid(),criadoEm:Date.now(),criadoPor:USER.nome,tipo:TIPOS_SERVICO[0],fornecedor:"",motivo:"",compraId:"",eventoId:"",empresaGeral:"",itens:[],especificacoes:"",valor:"",vencimento:hoje(),formaPag:"PIX",chavePix:"",codigoBoleto:"",boletoFoto:null,boletoNome:"",pago:false,pagoEm:""};formConta();}
 function editarConta(id){EDITCONTA=JSON.parse(JSON.stringify(CONTAS.find(c=>c.id===id)));fecharModal();formConta();}
+function editarContaCasa(id){EDITCONTA_CASA=JSON.parse(JSON.stringify(CONTAS_CASA.find(c=>c.id===id)));fecharModal();formConta();}
 function optgroupsEventosConta(c){
   return Object.keys(CONTRATOS).map(k=>{
     const evs=[...SERVICOS].filter(s=>(s.contrato||'evento')===k).sort((a,b)=>(b.data||'').localeCompare(a.data||'')).slice(0,60);
@@ -1714,9 +1782,9 @@ function optgroupsEventosConta(c){
     return `<optgroup label="${k==='evento'?'VR · Eventos avulsos':esc(CONTRATOS[k].nome)}">${evOpt}</optgroup>`;
   }).join('');
 }
-function formConta(){const c=EDITCONTA;
+function formConta(){const c=contaEditAtiva();const listaBase=contasAtivas();const casa=contaCasaAtiva();
   const comprasOpt=[...COMPRAS].sort((a,b)=>(b.data||'').localeCompare(a.data||'')).slice(0,60);
-  modal(`<h2 style="margin-bottom:12px">${CONTAS.find(x=>x.id===c.id)?"✏️ Editar conta":"💳 Nova conta a pagar"}</h2>
+  modal(`<h2 style="margin-bottom:12px">${listaBase.find(x=>x.id===c.id)?"✏️ Editar "+contaTituloAtivo():(casa?"🏠 Nova conta casa":"💳 Nova conta a pagar")}</h2>
     <div class="field"><label>Tipo de serviço</label><select id="ctTipo">${TIPOS_SERVICO.map(t=>`<option ${c.tipo===t?'selected':''}>${t}</option>`).join("")}</select></div>
     <div class="field"><label>Fornecedor / a quem paga</label><input id="ctForn" value="${esc(c.fornecedor)}" placeholder="Ex: Atacadão, João freela, Enel..."></div>
     <div class="field"><label>Motivo do pagamento</label><input id="ctMotivo" value="${esc(c.motivo||'')}" placeholder="Ex: compra de carnes p/ evento X, diária de garçom..."></div>
@@ -1749,20 +1817,21 @@ function formConta(){const c=EDITCONTA;
     <button class="btn gh" onclick="salvarConta()">Salvar conta</button>
     <button class="btn sec" style="margin-top:8px" onclick="fecharModal()">Cancelar</button>`);
   renderItensConta();renderBoletoFoto();}
-function renderBoletoFoto(){const b=$("#ctBolFotoBox");if(!b)return;const c=EDITCONTA;
+function renderBoletoFoto(){const b=$("#ctBolFotoBox");if(!b)return;const c=contaEditAtiva();
   b.innerHTML=c.boletoFoto?`<img src="${c.boletoFoto}" class="comprov-foto" onclick="verFoto('${c.boletoFoto}')">`:(c.boletoNome&&!c.boletoFoto?`<div class="info" style="margin-bottom:6px">📄 ${esc(c.boletoNome)} (PDF lido)</div>`:'');}
-function copiarCampoBoleto(){coletarConta();const t=(EDITCONTA.codigoBoleto||'').replace(/\D/g,'');if(!t){alert("Sem código pra copiar.");return;}
+function copiarCampoBoleto(){coletarConta();const t=(contaEditAtiva().codigoBoleto||'').replace(/\D/g,'');if(!t){alert("Sem código pra copiar.");return;}
   const done=()=>{const btn=event&&event.target;if(btn){const o=btn.textContent;btn.textContent="✅ Copiado";setTimeout(()=>btn.textContent=o,1500);}};
   if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(t).then(done).catch(()=>{fallbackCopia(t);done();});
   else {fallbackCopia(t);done();}}
 function fallbackCopia(t){const ta=document.createElement("textarea");ta.value=t;ta.style.position="fixed";ta.style.opacity="0";document.body.appendChild(ta);ta.select();try{document.execCommand("copy");}catch(e){}ta.remove();}
 function renderItensConta(){const b=$("#ctItensBox");if(!b)return;
-  b.innerHTML=(EDITCONTA.itens||[]).map((it,i)=>`<div class="item-linha">
-    <input class="nm" value="${esc(it.desc)}" placeholder="descrição do item" oninput="EDITCONTA.itens[${i}].desc=this.value">
-    <input class="vl" type="number" inputmode="decimal" value="${esc(it.valor)}" placeholder="R$" oninput="EDITCONTA.itens[${i}].valor=this.value">
-    <button class="x" onclick="EDITCONTA.itens.splice(${i},1);renderItensConta()">✕</button></div>`).join("")||`<p class="muted" style="font-size:13px;text-align:center;padding:6px">Sem itens (opcional).</p>`;}
-function addItemConta(){coletarConta();EDITCONTA.itens.push({desc:"",valor:""});renderItensConta();}
-function coletarConta(){if(!$("#ctTipo"))return;const c=EDITCONTA;
+  const c=contaEditAtiva();
+  b.innerHTML=(c.itens||[]).map((it,i)=>`<div class="item-linha">
+    <input class="nm" value="${esc(it.desc)}" placeholder="descrição do item" oninput="contaEditAtiva().itens[${i}].desc=this.value">
+    <input class="vl" type="number" inputmode="decimal" value="${esc(it.valor)}" placeholder="R$" oninput="contaEditAtiva().itens[${i}].valor=this.value">
+    <button class="x" onclick="contaEditAtiva().itens.splice(${i},1);renderItensConta()">✕</button></div>`).join("")||`<p class="muted" style="font-size:13px;text-align:center;padding:6px">Sem itens (opcional).</p>`;}
+function addItemConta(){coletarConta();contaEditAtiva().itens.push({desc:"",valor:""});renderItensConta();}
+function coletarConta(){if(!$("#ctTipo"))return;const c=contaEditAtiva();
   c.tipo=$("#ctTipo").value;c.fornecedor=$("#ctForn").value.trim();c.motivo=$("#ctMotivo").value.trim();
   c.especificacoes=$("#ctEspec").value.trim();c.valor=$("#ctValor").value;c.vencimento=$("#ctVenc").value;
   c.formaPag=$("#ctForma").value;c.chavePix=$("#ctPix").value.trim();c.codigoBoleto=$("#ctBoleto").value.trim();
@@ -1770,23 +1839,24 @@ function coletarConta(){if(!$("#ctTipo"))return;const c=EDITCONTA;
   if(ve.indexOf("ev:")===0){c.eventoId=ve.slice(3);c.empresaGeral="";}
   else if(ve.indexOf("emp:")===0){c.empresaGeral=ve.slice(4);c.eventoId="";}
   else {c.eventoId="";c.empresaGeral="";}}
-function vincularCompraConta(cid){coletarConta();const c=EDITCONTA;c.compraId=cid;
+function vincularCompraConta(cid){coletarConta();const c=contaEditAtiva();c.compraId=cid;
   if(cid){const cp=COMPRAS.find(x=>x.id===cid);if(cp){c.fornecedor=cp.fornecedor||c.fornecedor;c.valor=compraTotal(cp);
     c.itens=(cp.itens||[]).map(i=>({desc:(i.nome||'')+(i.qtd?` (${i.qtd} ${i.unidade||''})`:''),valor:(+i.qtd||0)*(+i.valorUnit||0)}));
     if(!c.motivo)c.motivo="Pagamento da compra em "+(cp.data||'');c.eventoId="";c.empresaGeral="";}}
   formConta();}
-function salvarConta(){coletarConta();const c=EDITCONTA;
+function salvarConta(){coletarConta();const c=contaEditAtiva();const casa=contaCasaAtiva();
   const pago=$("#ctPago").classList.contains("on");
   if(pago&&!c.pago)c.pagoEm=hoje();if(!pago)c.pagoEm="";c.pago=pago;
   if(!c.fornecedor){alert("Diga a quem você paga (fornecedor).");return;}
   if(!(+c.valor)){alert("Coloque o valor da conta.");return;}
-  cloudSet(COL.cont,c);EDITCONTA=null;fecharModal();renderContas();render();}
+  cloudSet(contaColAtiva(),c);setContaEdit(null);fecharModal();casa?renderContasCasa():renderContas();render();}
 function pagarConta(id){const c=CONTAS.find(x=>x.id===id);if(!c)return;c.pago=true;c.pagoEm=hoje();cloudSet(COL.cont,c);renderContas();render();}
-function copiarConta(id,campo){const c=CONTAS.find(x=>x.id===id);if(!c)return;const t=(campo==='pix'?c.chavePix:c.codigoBoleto)||'';if(!t)return;
+function pagarContaCasa(id){const c=CONTAS_CASA.find(x=>x.id===id);if(!c)return;c.pago=true;c.pagoEm=hoje();cloudSet(COL.contCasa,c);renderContasCasa();}
+function copiarConta(id,campo){const c=contasAtivas().find(x=>x.id===id);if(!c)return;const t=(campo==='pix'?c.chavePix:c.codigoBoleto)||'';if(!t)return;
   const ok=()=>alert('Copiado ✅');
   if(navigator.clipboard)navigator.clipboard.writeText(t).then(ok,()=>{});
   else{try{const ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();ok();}catch(e){}}}
-function abrirConta(id){const c=CONTAS.find(x=>x.id===id);if(!c)return;const st=statusConta(c);const cp=c.compraId?COMPRAS.find(x=>x.id===c.compraId):null;const ev=c.eventoId?SERVICOS.find(s=>s.id===c.eventoId):null;
+function abrirConta(id){const casa=contaCasaAtiva();const c=contasAtivas().find(x=>x.id===id);if(!c)return;const st=statusConta(c);const cp=c.compraId?COMPRAS.find(x=>x.id===c.compraId):null;const ev=c.eventoId?SERVICOS.find(s=>s.id===c.eventoId):null;
   modal(`<h2 style="margin-bottom:2px">${esc(c.tipo||'Conta')}</h2>
     <p class="muted">${esc(c.fornecedor||'')}${c.criadoPor?' · lançado por '+esc(c.criadoPor):''}</p>
     <div class="resumo"><div class="li"><span>Valor</span><b>${brl(c.valor)}</b></div>
@@ -1802,10 +1872,12 @@ function abrirConta(id){const c=CONTAS.find(x=>x.id===id);if(!c)return;const st=
     ${c.codigoBoleto?`<div style="display:flex;gap:8px;align-items:center;margin-top:6px;background:#f8fafc;border:1px solid var(--linha);border-radius:8px;padding:9px"><div style="flex:1;font-size:12px;word-break:break-all"><b>Boleto:</b><br>${esc(c.codigoBoleto)}</div><button class="btn sm" style="flex:0 0 auto" onclick="copiarConta('${c.id}','boleto')">📋 Copiar</button></div>`:''}
     ${c.boletoFoto?`<img src="${c.boletoFoto}" class="comprov-foto" style="margin-top:6px" onclick="verFoto('${c.boletoFoto}')">`:''}
     ${c.especificacoes?`<div class="sec-tit">📄 Especificações</div><p style="font-size:14px">${esc(c.especificacoes)}</p>`:''}
-    ${!c.pago?`<button class="btn gh" style="margin-top:14px" onclick="pagarConta('${c.id}');fecharModal()">✔️ Marcar como paga</button>`:''}
-    <div class="row" style="margin-top:8px"><button class="btn sec" onclick="editarConta('${c.id}')">✏️ Editar</button>${isAdmin()?`<button class="btn rd" onclick="excluirConta('${c.id}')">🗑️ Excluir</button>`:''}</div>
+    ${!c.pago?`<button class="btn gh" style="margin-top:14px" onclick="${casa?'pagarContaCasa':'pagarConta'}('${c.id}');fecharModal()">✔️ Marcar como paga</button>`:''}
+    <div class="row" style="margin-top:8px"><button class="btn sec" onclick="${casa?'editarContaCasa':'editarConta'}('${c.id}')">✏️ Editar</button>${isAdmin()||casa?`<button class="btn rd" onclick="${casa?'excluirContaCasa':'excluirConta'}('${c.id}')">🗑️ Excluir</button>`:''}</div>
     <button class="btn sec" style="margin-top:8px" onclick="fecharModal()">Fechar</button>`);}
+function abrirContaCasa(id){abrirConta(id);}
 function excluirConta(id){if(!confirm("Excluir esta conta?"))return;CONTAS=CONTAS.filter(c=>c.id!==id);cloudDel(COL.cont,id);fecharModal();renderContas();render();}
+function excluirContaCasa(id){if(!confirm("Excluir esta conta casa?"))return;CONTAS_CASA=CONTAS_CASA.filter(c=>c.id!==id);cloudDel(COL.contCasa,id);fecharModal();renderContasCasa();}
 
 /* ===================== CMV (padrão ERP Total Food) ===================== */
 function cmvCor(v){return v==null?'var(--cinza)':(v<=50?'#2ec27a':(v<=65?'#e0a23a':'#e2554b'));}
@@ -1924,7 +1996,7 @@ function renderConfig(){if(!isAdmin())return;
 }
 function renderFuncBox(){const b=$("#funcBox");if(!b)return;
   if(!FUNCIONARIOS.length){b.innerHTML=`<p class="muted" style="font-size:13px;text-align:center;padding:8px">Nenhum funcionário cadastrado ainda.</p>`;return;}
-  b.innerHTML=FUNCIONARIOS.map(f=>{const ics=[f.permContas?'💳':'',f.permRecibos?'🧾':'',f.permCmv?'🧮':'',f.permPrecos?'💲':'',f.permEstoque?'📦':'',f.permAlterar?'✏️':''].join('');
+  b.innerHTML=FUNCIONARIOS.map(f=>{const ics=[f.permContas?'💳':'',f.permContasCasa?'🏠':'',f.permRecibos?'🧾':'',f.permCmv?'🧮':'',f.permPrecos?'💲':'',f.permEstoque?'📦':'',f.permAlterar?'✏️':''].join('');
    return `<div class="item-linha" style="background:${f.ativo===false?'#f8fafc':'#fff'};flex-wrap:wrap">
     <div class="nm" style="flex:1 1 100%">${esc(f.nome)}${f.ativo===false?' <span class="muted" style="font-weight:600">(inativo)</span>':''}${ics?' <span class="tag" style="background:var(--amar-claro);color:#b45309;font-size:11px">'+ics+'</span>':''}<div class="muted" style="font-size:11px;font-weight:600">${esc(f.email||'')}</div></div>
     <button class="btn sm sec" style="flex:0 0 auto" onclick="reenviarSenhaFunc('${esc(f.email)}')">📧 senha</button>
@@ -1935,16 +2007,17 @@ function editarAcessos(id){const f=FUNCIONARIOS.find(x=>x.id===id);if(!f)return;
   modal(`<h3>🔑 Acessos de ${esc(f.nome)}</h3>
     <p class="hint" style="margin-bottom:10px">Marque o que essa pessoa pode acessar. Eventos, Compras e Estoque todo funcionário já tem. Painel do dono e Configurações são só seus.</p>
     <label class="check"><input type="checkbox" id="acC" ${f.permContas?'checked':''}><span>💳 Contas a pagar</span></label>
+    <label class="check"><input type="checkbox" id="acCC" ${f.permContasCasa?'checked':''}><span>🏠 Contas Casa</span></label>
     <label class="check"><input type="checkbox" id="acR" ${f.permRecibos?'checked':''}><span>🧾 Recibos</span></label>
     <label class="check"><input type="checkbox" id="acM" ${f.permCmv?'checked':''}><span>🧮 CMV</span></label>
     <label class="check"><input type="checkbox" id="acP" ${f.permPrecos?'checked':''}><span>💲 Preços</span></label>
     <label class="check"><input type="checkbox" id="acS" ${f.permEstoque?'checked':''}><span>📦 Lançar/ajustar Estoque (ler nota, +item, valores)</span></label>
     <label class="check"><input type="checkbox" id="acA" ${f.permAlterar?'checked':''}><span>✏️ Alterar pedido já lançado (exige justificativa e fica registrado)</span></label>
-    <button class="btn sec sm" style="width:100%;margin:8px 0" onclick="document.querySelectorAll('#acC,#acR,#acM,#acP,#acS,#acA').forEach(c=>c.checked=true)">🧑‍💼 Marcar todos (Gerente)</button>
+    <button class="btn sec sm" style="width:100%;margin:8px 0" onclick="document.querySelectorAll('#acC,#acCC,#acR,#acM,#acP,#acS,#acA').forEach(c=>c.checked=true)">🧑‍💼 Marcar todos (Gerente)</button>
     <button class="btn gh" onclick="salvarAcessos('${id}')">Salvar acessos</button>
     <button class="btn sec" style="margin-top:8px" onclick="fecharModal()">Cancelar</button>`);}
 function salvarAcessos(id){const f=FUNCIONARIOS.find(x=>x.id===id);if(!f)return;
-  f.permContas=$("#acC").checked;f.permRecibos=$("#acR").checked;f.permCmv=$("#acM").checked;f.permPrecos=$("#acP").checked;f.permEstoque=$("#acS").checked;f.permAlterar=$("#acA").checked;
+  f.permContas=$("#acC").checked;f.permContasCasa=$("#acCC").checked;f.permRecibos=$("#acR").checked;f.permCmv=$("#acM").checked;f.permPrecos=$("#acP").checked;f.permEstoque=$("#acS").checked;f.permAlterar=$("#acA").checked;
   cloudSet(COL.user,f);fecharModal();renderFuncBox();}
 function addFuncionario(){
   modal(`<h3>👷 Cadastrar funcionário</h3>
@@ -1966,7 +2039,7 @@ async function salvarFuncionario(){
     const cred=await sec.auth().createUserWithEmailAndPassword(email,senha);
     const uid=cred.user.uid; await sec.auth().signOut();
     const g=!!($("#fnGerente")&&$("#fnGerente").checked);
-    await cloudSet(COL.user,{id:uid,uid:uid,email:email,nome:nome,role:"func",ativo:true,permContas:g,permRecibos:g,permCmv:g,permPrecos:g,permEstoque:g,permAlterar:g,criadoEm:Date.now()});
+    await cloudSet(COL.user,{id:uid,uid:uid,email:email,nome:nome,role:"func",ativo:true,permContas:g,permContasCasa:/keila/i.test(nome+" "+email),permRecibos:g,permCmv:g,permPrecos:g,permEstoque:g,permAlterar:g,criadoEm:Date.now()});
     fecharModal();alert("Funcionário criado ✅\nEle já pode entrar com o email:\n"+email);
   }catch(e){const c=((e.code)||"")+"";
     if(c.indexOf("email-already-in-use")>=0)alert("Esse email já tem conta. Se for da equipe, peça pra usar 'esqueci minha senha'.");
@@ -1982,7 +2055,7 @@ async function salvarConfig(){
   if(FB_OK){try{await DB.collection(COL.user).doc("config_app").set({id:"config_app",apiKey:CONFIG.apiKey,modelo:CONFIG.modelo,atualizadoEm:Date.now()});}catch(e){avisoNuvem(e);}}
   alert("Configurações salvas ✅\nA leitura por IA agora funciona pra toda a equipe.");}
 async function carregarConfigNuvem(){if(!FB_OK)return;try{const d=await DB.collection(COL.user).doc("config_app").get();if(d.exists){const x=d.data();if(x.apiKey)CONFIG.apiKey=x.apiKey;if(x.modelo)CONFIG.modelo=x.modelo;}}catch(e){}}
-function exportarBackup(){const blob=new Blob([JSON.stringify({SERVICOS,COMPRAS,ESTOQUE,CONFIG,FUNCIONARIOS,CONTAS},null,2)],{type:"application/json"});
+function exportarBackup(){const blob=new Blob([JSON.stringify({SERVICOS,COMPRAS,ESTOQUE,CONFIG,FUNCIONARIOS,CONTAS,CONTAS_CASA},null,2)],{type:"application/json"});
   const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="backup-vr-"+hoje()+".json";a.click();}
 function importarBackup(input){const f=input.files&&input.files[0];if(!f)return;const r=new FileReader();
   r.onload=async e=>{try{const d=JSON.parse(e.target.result);if(!confirm("Isso ENVIA os dados do arquivo pra nuvem (soma aos atuais). Continuar?"))return;
@@ -1990,6 +2063,7 @@ function importarBackup(input){const f=input.files&&input.files[0];if(!f)return;
     for(const c of (d.COMPRAS||[]))await cloudSet(COL.comp,c);
     for(const es of (d.ESTOQUE||[]))if(es.id)await cloudSet(COL.est,es);
     for(const co of (d.CONTAS||[]))await cloudSet(COL.cont,co);
+    for(const cc of (d.CONTAS_CASA||[]))await cloudSet(COL.contCasa,cc);
     if(d.CONFIG){CONFIG=Object.assign({},CONF_PADRAO,{apiKey:d.CONFIG.apiKey||CONFIG.apiKey,modelo:d.CONFIG.modelo||CONFIG.modelo});salvarConf();}
     alert("Backup enviado pra nuvem ✅");
   }catch(err){alert("Arquivo inválido.");}};r.readAsText(f);}
@@ -2012,6 +2086,7 @@ function refreshUI(){if(!USER)return;const t=CURRENT_TAB;
   if(t==="painel"||t==="painelf"||t==="eventos")render();
   else if(t==="compras")renderCompras();
   else if(t==="contas")renderContas();
+  else if(t==="contas-casa")renderContasCasa();
   else if(t==="recibos")renderRecibos();
   else if(t==="cmv")renderCMV();
   else if(t==="estoque")renderEstoque();
@@ -2019,7 +2094,7 @@ function refreshUI(){if(!USER)return;const t=CURRENT_TAB;
 async function resolverPapel(user){
   if((user.email||"").toLowerCase()===ADMIN_EMAIL)return {papel:"admin",nome:"Marcelo"};
   try{const d=await DB.collection(COL.user).doc(user.uid).get();
-    if(d.exists){const x=d.data();if(x.ativo===false)return {bloqueado:true};return {papel:x.role||"func",nome:x.nome||user.email,permContas:!!x.permContas,permRecibos:!!x.permRecibos,permCmv:!!x.permCmv,permPrecos:!!x.permPrecos,permEstoque:!!x.permEstoque,permAlterar:!!x.permAlterar};}}catch(e){}
+    if(d.exists){const x=d.data();if(x.ativo===false)return {bloqueado:true};return {papel:x.role||"func",nome:x.nome||user.email,permContas:!!x.permContas,permContasCasa:!!x.permContasCasa,permRecibos:!!x.permRecibos,permCmv:!!x.permCmv,permPrecos:!!x.permPrecos,permEstoque:!!x.permEstoque,permAlterar:!!x.permAlterar};}}catch(e){}
   return {papel:"func",nome:user.email};
 }
 carregarConfLocal();
@@ -2029,7 +2104,7 @@ if(FB_OK){
       const b=$("#btnEntrar");if(b){b.textContent="Entrar";b.disabled=false;}return;}
     const r=await resolverPapel(user);
     if(r.bloqueado){alert("Seu acesso foi desativado. Fale com o gestor.");AUTH.signOut();return;}
-    USER={uid:user.uid,email:user.email,nome:r.nome,papel:r.papel,permContas:!!r.permContas,permRecibos:!!r.permRecibos,permCmv:!!r.permCmv,permPrecos:!!r.permPrecos,permEstoque:!!r.permEstoque,permAlterar:!!r.permAlterar};
+    USER={uid:user.uid,email:user.email,nome:r.nome,papel:r.papel,permContas:!!r.permContas,permContasCasa:!!r.permContasCasa,permRecibos:!!r.permRecibos,permCmv:!!r.permCmv,permPrecos:!!r.permPrecos,permEstoque:!!r.permEstoque,permAlterar:!!r.permAlterar};
     if(r.papel==="admin")cloudSet(COL.user,{id:user.uid,uid:user.uid,email:user.email,nome:r.nome,role:"admin",ativo:true});
     iniciar();
   });
