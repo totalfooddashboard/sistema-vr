@@ -390,7 +390,7 @@ catch(e){ console.warn("Firebase falhou:",e); }
 <script>
 /* ===================== SISTEMA VR ===================== */
 const K_CONF="vr_config_v1"; // só config local (chave IA/modelo) — dados ficam na nuvem
-const COL={ev:"vr_eventos", comp:"vr_compras", cont:"vr_contas", contCasa:"vr_contas_casa", est:"vr_estoque", user:"vr_usuarios", rec:"vr_recibos"};
+const COL={ev:"vr_eventos", comp:"vr_compras", cont:"vr_contas", contCasa:"vr_contas", est:"vr_estoque", user:"vr_usuarios", rec:"vr_recibos"};
 let SERVICOS=[], COMPRAS=[], ESTOQUE=[], CONFIG=null, USER=null, FUNCIONARIOS=[], CONTAS=[], CONTAS_CASA=[], RECIBOS=[];
 const EMPRESA={nome:"Vr Refeições",cnpj:"27.731.980/0001-59",email:"marcelo@vrrefeicoes.com.br",tel:"(85) 8833-9998",end:"Rua Nossa Senhora da Glória, 1295, Barroso, Fortaleza-CE, 60862-585",pix:"27731980000159"};
 let SUBS=[]; // unsubscribes das escutas em tempo real
@@ -509,12 +509,18 @@ function escutar(col,setArr){
   const un=DB.collection(col).onSnapshot(snap=>{const a=[];snap.forEach(d=>a.push(d.data()));setArr(a);montarFiltroMes();refreshUI();},err=>console.warn("escuta "+col+":",err&&err.code));
   SUBS.push(un);
 }
+function dividirContas(a){CONTAS=a.filter(c=>!c.contaCasa);CONTAS_CASA=a.filter(c=>c.contaCasa);}
+function escutarContasCasa(){
+  const un=DB.collection(COL.cont).where("contaCasa","==",true).onSnapshot(snap=>{const a=[];snap.forEach(d=>a.push(d.data()));CONTAS=[];CONTAS_CASA=a;montarFiltroMes();refreshUI();},err=>console.warn("escuta contas casa:",err&&err.code));
+  SUBS.push(un);
+}
 function iniciarEscutas(){
   pararEscutas();
   escutar(COL.ev, a=>SERVICOS=a);
   escutar(COL.comp, a=>COMPRAS=a);
-  escutar(COL.cont, a=>CONTAS=a);
-  if(podeContasCasa())escutar(COL.contCasa, a=>CONTAS_CASA=a);
+  if(podeContas())escutar(COL.cont, dividirContas);
+  else if(podeContasCasa())escutarContasCasa();
+  else {CONTAS=[];CONTAS_CASA=[];}
   escutar(COL.est, a=>ESTOQUE=a);
   if(isAdmin())escutar(COL.user, a=>FUNCIONARIOS=a.filter(u=>u.role==="func"));
   if(podeVer("recibos"))escutar(COL.rec, a=>RECIBOS=a);
@@ -1772,7 +1778,7 @@ function renderContasCasa(){const host=$("#listaContasCasa");if(!host)return;
 }
 function diasPara(d){const a=new Date(hoje()+"T00:00:00"),b=new Date(d+"T00:00:00");return Math.round((b-a)/86400000);}
 function novaConta(){EDITCONTA={id:uid(),criadoEm:Date.now(),criadoPor:USER.nome,tipo:TIPOS_SERVICO[0],fornecedor:"",motivo:"",compraId:"",eventoId:"",empresaGeral:"",itens:[],especificacoes:"",valor:"",vencimento:hoje(),formaPag:"PIX",chavePix:"",codigoBoleto:"",boletoFoto:null,boletoNome:"",pago:false,pagoEm:""};formConta();}
-function novaContaCasa(){EDITCONTA_CASA={id:uid(),criadoEm:Date.now(),criadoPor:USER.nome,tipo:TIPOS_SERVICO[0],fornecedor:"",motivo:"",compraId:"",eventoId:"",empresaGeral:"",itens:[],especificacoes:"",valor:"",vencimento:hoje(),formaPag:"PIX",chavePix:"",codigoBoleto:"",boletoFoto:null,boletoNome:"",pago:false,pagoEm:""};formConta();}
+function novaContaCasa(){EDITCONTA_CASA={id:uid(),contaCasa:true,criadoEm:Date.now(),criadoPor:USER.nome,tipo:TIPOS_SERVICO[0],fornecedor:"",motivo:"",compraId:"",eventoId:"",empresaGeral:"",itens:[],especificacoes:"",valor:"",vencimento:hoje(),formaPag:"PIX",chavePix:"",codigoBoleto:"",boletoFoto:null,boletoNome:"",pago:false,pagoEm:""};formConta();}
 function editarConta(id){EDITCONTA=JSON.parse(JSON.stringify(CONTAS.find(c=>c.id===id)));fecharModal();formConta();}
 function editarContaCasa(id){EDITCONTA_CASA=JSON.parse(JSON.stringify(CONTAS_CASA.find(c=>c.id===id)));fecharModal();formConta();}
 function optgroupsEventosConta(c){
@@ -1849,6 +1855,7 @@ function salvarConta(){coletarConta();const c=contaEditAtiva();const casa=contaC
   if(pago&&!c.pago)c.pagoEm=hoje();if(!pago)c.pagoEm="";c.pago=pago;
   if(!c.fornecedor){alert("Diga a quem você paga (fornecedor).");return;}
   if(!(+c.valor)){alert("Coloque o valor da conta.");return;}
+  c.contaCasa=!!casa;
   cloudSet(contaColAtiva(),c);setContaEdit(null);fecharModal();casa?renderContasCasa():renderContas();render();}
 function pagarConta(id){const c=CONTAS.find(x=>x.id===id);if(!c)return;c.pago=true;c.pagoEm=hoje();cloudSet(COL.cont,c);renderContas();render();}
 function pagarContaCasa(id){const c=CONTAS_CASA.find(x=>x.id===id);if(!c)return;c.pago=true;c.pagoEm=hoje();cloudSet(COL.contCasa,c);renderContasCasa();}
@@ -2063,7 +2070,7 @@ function importarBackup(input){const f=input.files&&input.files[0];if(!f)return;
     for(const c of (d.COMPRAS||[]))await cloudSet(COL.comp,c);
     for(const es of (d.ESTOQUE||[]))if(es.id)await cloudSet(COL.est,es);
     for(const co of (d.CONTAS||[]))await cloudSet(COL.cont,co);
-    for(const cc of (d.CONTAS_CASA||[]))await cloudSet(COL.contCasa,cc);
+    for(const cc of (d.CONTAS_CASA||[])){cc.contaCasa=true;await cloudSet(COL.contCasa,cc);}
     if(d.CONFIG){CONFIG=Object.assign({},CONF_PADRAO,{apiKey:d.CONFIG.apiKey||CONFIG.apiKey,modelo:d.CONFIG.modelo||CONFIG.modelo});salvarConf();}
     alert("Backup enviado pra nuvem ✅");
   }catch(err){alert("Arquivo inválido.");}};r.readAsText(f);}
