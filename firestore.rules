@@ -1,0 +1,90 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return signedIn() && request.auth.token.email == "marcelo@vrrefeicoes.com.br";
+    }
+
+    function usuario() {
+      return get(/databases/$(database)/documents/vr_usuarios/$(request.auth.uid)).data;
+    }
+
+    function temPermissao(campo) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/vr_usuarios/$(request.auth.uid))
+        && usuario().ativo != false
+        && usuario()[campo] == true;
+    }
+
+    function emailKeila() {
+      return signedIn()
+        && request.auth.token.email != null
+        && request.auth.token.email.matches(".*keila.*");
+    }
+
+    function contaCasaNova() {
+      return request.resource.data.contaCasa == true;
+    }
+
+    function contaCasaExistente() {
+      return resource.data.contaCasa == true;
+    }
+
+    // ---------- CENTRAL DE QUALIDADE ----------
+    match /clientes/{id} {
+      allow read: if true;
+      allow write: if signedIn();
+    }
+    match /ocorrencias/{id} {
+      allow create: if true;
+      allow read, update, delete: if signedIn();
+    }
+    match /avaliacoes/{id} {
+      allow create: if true;
+      allow read, update, delete: if signedIn();
+    }
+    match /responsaveis/{id} {
+      allow read, write: if signedIn();
+    }
+    match /usuarios/{id} {
+      allow read, write: if signedIn();
+    }
+
+    // ---------- PLATAFORMA DE PEDIDOS ----------
+    match /ped_empresas/{id} {
+      allow read, write: if signedIn();
+    }
+    match /ped_pedidos/{id} {
+      allow read, write: if signedIn();
+    }
+    match /ped_usuarios/{id} {
+      allow read, write: if signedIn();
+    }
+    match /ped_cardapios/{id} {
+      allow read, write: if signedIn();
+    }
+
+    // ---------- VR REFEICOES ----------
+    match /vr_eventos/{id}  { allow read, write: if signedIn(); }
+    match /vr_compras/{id}  { allow read, write: if signedIn(); }
+    match /vr_estoque/{id}  { allow read, write: if signedIn(); }
+    match /vr_usuarios/{id} { allow read, write: if signedIn(); }
+    match /vr_recibos/{id}  { allow read, write: if signedIn(); }
+
+    match /vr_contas/{id} {
+      allow read: if isAdmin() || temPermissao("permContas") || ((temPermissao("permContasCasa") || emailKeila()) && contaCasaExistente());
+      allow create: if isAdmin() || temPermissao("permContas") || ((temPermissao("permContasCasa") || emailKeila()) && contaCasaNova());
+      allow update: if isAdmin() || temPermissao("permContas") || ((temPermissao("permContasCasa") || emailKeila()) && contaCasaExistente() && contaCasaNova());
+      allow delete: if isAdmin() || temPermissao("permContas") || ((temPermissao("permContasCasa") || emailKeila()) && contaCasaExistente());
+    }
+
+    // Colecao antiga criada na primeira tentativa. Mantida para nao quebrar dados ja lancados.
+    match /vr_contas_casa/{id} {
+      allow read, write: if isAdmin() || temPermissao("permContasCasa") || emailKeila();
+    }
+  }
+}
