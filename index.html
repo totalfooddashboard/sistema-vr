@@ -1777,8 +1777,8 @@ function renderContasCasa(){const host=$("#listaContasCasa");if(!host)return;
     </div>`;}).join("");
 }
 function diasPara(d){const a=new Date(hoje()+"T00:00:00"),b=new Date(d+"T00:00:00");return Math.round((b-a)/86400000);}
-function novaConta(){EDITCONTA={id:uid(),criadoEm:Date.now(),criadoPor:USER.nome,tipo:TIPOS_SERVICO[0],fornecedor:"",motivo:"",compraId:"",eventoId:"",empresaGeral:"",itens:[],especificacoes:"",valor:"",vencimento:hoje(),formaPag:"PIX",chavePix:"",codigoBoleto:"",boletoFoto:null,boletoNome:"",pago:false,pagoEm:""};formConta();}
-function novaContaCasa(){EDITCONTA_CASA={id:uid(),contaCasa:true,criadoEm:Date.now(),criadoPor:USER.nome,tipo:TIPOS_SERVICO[0],fornecedor:"",motivo:"",compraId:"",eventoId:"",empresaGeral:"",itens:[],especificacoes:"",valor:"",vencimento:hoje(),formaPag:"PIX",chavePix:"",codigoBoleto:"",boletoFoto:null,boletoNome:"",pago:false,pagoEm:""};formConta();}
+function novaConta(){EDITCONTA={id:uid(),criadoEm:Date.now(),criadoPor:USER.nome,tipo:TIPOS_SERVICO[0],fornecedor:"",motivo:"",compraId:"",eventoId:"",empresaGeral:"",itens:[],especificacoes:"",valor:"",vencimento:hoje(),formaPag:"PIX",chavePix:"",codigoBoleto:"",boletoFoto:null,boletoNome:"",comprovantePagFoto:null,comprovantePagNome:"",comprovantePagTipo:"",pago:false,pagoEm:""};formConta();}
+function novaContaCasa(){EDITCONTA_CASA={id:uid(),contaCasa:true,criadoEm:Date.now(),criadoPor:USER.nome,tipo:TIPOS_SERVICO[0],fornecedor:"",motivo:"",compraId:"",eventoId:"",empresaGeral:"",itens:[],especificacoes:"",valor:"",vencimento:hoje(),formaPag:"PIX",chavePix:"",codigoBoleto:"",boletoFoto:null,boletoNome:"",comprovantePagFoto:null,comprovantePagNome:"",comprovantePagTipo:"",pago:false,pagoEm:""};formConta();}
 function editarConta(id){EDITCONTA=JSON.parse(JSON.stringify(CONTAS.find(c=>c.id===id)));fecharModal();formConta();}
 function editarContaCasa(id){EDITCONTA_CASA=JSON.parse(JSON.stringify(CONTAS_CASA.find(c=>c.id===id)));fecharModal();formConta();}
 function optgroupsEventosConta(c){
@@ -1820,15 +1820,28 @@ function formConta(){const c=contaEditAtiva();const listaBase=contasAtivas();con
     <div class="field"><label>Situação</label><div class="pill-select">
       <button id="ctAberto" class="${!c.pago?'on':''}" onclick="this.parentElement.querySelectorAll('button').forEach(x=>x.classList.remove('on'));this.classList.add('on')">Em aberto</button>
       <button id="ctPago" class="${c.pago?'on':''}" onclick="this.parentElement.querySelectorAll('button').forEach(x=>x.classList.remove('on'));this.classList.add('on')">Já paga</button></div></div>
+    <div class="sec-tit" style="font-size:13px">Comprovante de pagamento</div>
+    <input type="file" accept="image/*,application/pdf" id="ctPagInput" style="display:none" onchange="receberComprovantePagamentoForm(this)">
+    <button class="btn sec" style="width:100%" onclick="$('#ctPagInput').click()">Anexar comprovante pago</button>
+    <div id="ctPagFotoBox"></div>
     <button class="btn gh" onclick="salvarConta()">Salvar conta</button>
     <button class="btn sec" style="margin-top:8px" onclick="fecharModal()">Cancelar</button>`);
-  renderItensConta();renderBoletoFoto();}
+  renderItensConta();renderBoletoFoto();renderComprovantePagamentoForm();}
 function renderBoletoFoto(){const b=$("#ctBolFotoBox");if(!b)return;const c=contaEditAtiva();
   b.innerHTML=c.boletoFoto?`<img src="${c.boletoFoto}" class="comprov-foto" onclick="verFoto('${c.boletoFoto}')">`:(c.boletoNome&&!c.boletoFoto?`<div class="info" style="margin-bottom:6px">📄 ${esc(c.boletoNome)} (PDF lido)</div>`:'');}
 function copiarCampoBoleto(){coletarConta();const t=(contaEditAtiva().codigoBoleto||'').replace(/\D/g,'');if(!t){alert("Sem código pra copiar.");return;}
   const done=()=>{const btn=event&&event.target;if(btn){const o=btn.textContent;btn.textContent="✅ Copiado";setTimeout(()=>btn.textContent=o,1500);}};
   if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(t).then(done).catch(()=>{fallbackCopia(t);done();});
   else {fallbackCopia(t);done();}}
+function renderComprovantePagamentoForm(){const b=$("#ctPagFotoBox");if(!b)return;const c=contaEditAtiva();
+  b.innerHTML=c.comprovantePagFoto?`<div class="info" style="margin-top:8px;margin-bottom:6px">Comprovante anexado: ${esc(c.comprovantePagNome||'arquivo')}</div>${(c.comprovantePagTipo||'').indexOf('pdf')>=0?`<a class="btn sec sm" style="display:block;text-align:center;width:100%" href="${c.comprovantePagFoto}" download="${esc(c.comprovantePagNome||'comprovante.pdf')}">Baixar comprovante</a>`:`<img src="${c.comprovantePagFoto}" class="comprov-foto" onclick="verFoto('${c.comprovantePagFoto}')">`}`:'';}
+function processarComprovantePagamento(file,cb){if(!file)return;const ehImg=(file.type||"").indexOf("image")>=0;const ehPdf=/pdf/i.test(file.type||"")||/\.pdf$/i.test(file.name||"");
+  const finish=(du,tipo)=>{if(du.length>900000){alert("Comprovante muito grande. Envie uma foto mais leve ou tire print do comprovante.");return;}cb({foto:du,nome:file.name||"comprovante",tipo:tipo||file.type||""});};
+  const reader=new FileReader();reader.onload=e=>{if(ehImg){const img=new Image();img.onload=()=>{const max=1200;let w=img.width,h=img.height;if(w>h&&w>max){h=h*max/w;w=max;}else if(h>max){w=w*max/h;h=max;}const cv=document.createElement("canvas");cv.width=w;cv.height=h;cv.getContext("2d").drawImage(img,0,0,w,h);finish(cv.toDataURL("image/jpeg",0.68),"image/jpeg");};img.src=e.target.result;}
+    else if(ehPdf)finish(e.target.result,"application/pdf");else alert("Use imagem ou PDF.");};
+  reader.readAsDataURL(file);}
+function receberComprovantePagamentoForm(input){const file=input.files&&input.files[0];if(!file)return;input.value="";coletarConta();processarComprovantePagamento(file,r=>{const c=contaEditAtiva();c.comprovantePagFoto=r.foto;c.comprovantePagNome=r.nome;c.comprovantePagTipo=r.tipo;renderComprovantePagamentoForm();});}
+function receberComprovantePagamentoConta(input,id,casa){const file=input.files&&input.files[0];if(!file)return;input.value="";processarComprovantePagamento(file,r=>{const lista=casa?CONTAS_CASA:CONTAS;const c=lista.find(x=>x.id===id);if(!c)return;c.pago=true;if(!c.pagoEm)c.pagoEm=hoje();c.comprovantePagFoto=r.foto;c.comprovantePagNome=r.nome;c.comprovantePagTipo=r.tipo;cloudSet(casa?COL.contCasa:COL.cont,c);casa?renderContasCasa():renderContas();render();abrirConta(id);});}
 function fallbackCopia(t){const ta=document.createElement("textarea");ta.value=t;ta.style.position="fixed";ta.style.opacity="0";document.body.appendChild(ta);ta.select();try{document.execCommand("copy");}catch(e){}ta.remove();}
 function renderItensConta(){const b=$("#ctItensBox");if(!b)return;
   const c=contaEditAtiva();
@@ -1878,8 +1891,11 @@ function abrirConta(id){const casa=contaCasaAtiva();const c=contasAtivas().find(
     ${c.chavePix?`<div style="display:flex;gap:8px;align-items:center;margin-top:6px;background:#f2f8f5;border:1px solid var(--verde-cl);border-radius:8px;padding:9px"><div style="flex:1;font-size:13px;word-break:break-all"><b>PIX:</b><br>${esc(c.chavePix)}</div><button class="btn sm" style="flex:0 0 auto" onclick="copiarConta('${c.id}','pix')">📋 Copiar</button></div>`:''}
     ${c.codigoBoleto?`<div style="display:flex;gap:8px;align-items:center;margin-top:6px;background:#f8fafc;border:1px solid var(--linha);border-radius:8px;padding:9px"><div style="flex:1;font-size:12px;word-break:break-all"><b>Boleto:</b><br>${esc(c.codigoBoleto)}</div><button class="btn sm" style="flex:0 0 auto" onclick="copiarConta('${c.id}','boleto')">📋 Copiar</button></div>`:''}
     ${c.boletoFoto?`<img src="${c.boletoFoto}" class="comprov-foto" style="margin-top:6px" onclick="verFoto('${c.boletoFoto}')">`:''}
+    ${c.comprovantePagFoto?`<div class="sec-tit">Comprovante de pagamento</div><div class="info" style="margin-bottom:6px">${esc(c.comprovantePagNome||'comprovante')}</div>${(c.comprovantePagTipo||'').indexOf('pdf')>=0?`<a class="btn sec sm" style="display:block;text-align:center;width:100%" href="${c.comprovantePagFoto}" download="${esc(c.comprovantePagNome||'comprovante.pdf')}">Baixar comprovante</a>`:`<img src="${c.comprovantePagFoto}" class="comprov-foto" style="margin-top:6px" onclick="verFoto('${c.comprovantePagFoto}')">`}`:''}
     ${c.especificacoes?`<div class="sec-tit">📄 Especificações</div><p style="font-size:14px">${esc(c.especificacoes)}</p>`:''}
-    ${!c.pago?`<button class="btn gh" style="margin-top:14px" onclick="${casa?'pagarContaCasa':'pagarConta'}('${c.id}');fecharModal()">✔️ Marcar como paga</button>`:''}
+    <input type="file" accept="image/*,application/pdf" id="pgCompInput" style="display:none" onchange="receberComprovantePagamentoConta(this,'${c.id}',${casa})">
+    ${!c.pago?`<button class="btn gh" style="margin-top:14px" onclick="${casa?'pagarContaCasa':'pagarConta'}('${c.id}');fecharModal()">✔️ Marcar como paga</button>
+    <button class="btn sec" style="margin-top:8px" onclick="$('#pgCompInput').click()">Marcar paga e anexar comprovante</button>`:`<button class="btn sec" style="margin-top:14px" onclick="$('#pgCompInput').click()">${c.comprovantePagFoto?'Substituir':'Anexar'} comprovante de pagamento</button>`}
     <div class="row" style="margin-top:8px"><button class="btn sec" onclick="${casa?'editarContaCasa':'editarConta'}('${c.id}')">✏️ Editar</button>${isAdmin()||casa?`<button class="btn rd" onclick="${casa?'excluirContaCasa':'excluirConta'}('${c.id}')">🗑️ Excluir</button>`:''}</div>
     <button class="btn sec" style="margin-top:8px" onclick="fecharModal()">Fechar</button>`);}
 function abrirContaCasa(id){abrirConta(id);}
